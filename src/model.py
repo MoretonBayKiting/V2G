@@ -395,6 +395,7 @@ def plot_res(st, df, chart_type, period="mthly"):
                 "effective_import_price",
                 "remaining_consumption",
                 "price_kwh",
+                "month",
             ]
             numeric_cols = [
                 col

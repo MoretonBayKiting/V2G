@@ -1,10 +1,16 @@
-
-# Ignore everything except Python files in src/
+# Ignore everything by default
 *
 !.gitignore
 !requirements.txt
+
+# Allow Python files in src/
 !src/
 !src/**/*.py
+
+# Allow JSON files in data/inputs/
+!data/inputs/
+!data/inputs/*.json
+!data/inputs/*.csv
 
 # Ignore Python cache and compiled files everywhere
 __pycache__/
@@ -15,10 +21,22 @@ __pycache__/
 *.ipynb_checkpoints
 *.streamlit
 
-# Ignore common data and export directories
-data/
+# Ignore virtual environments and package folders
+.venv/
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Ignore all files in data and synthetic except .gitkeep and allowed .json
+data/*
+!data/inputs/
+!data/inputs/*.json
 !data/.gitkeep
-synthetic/
+
+synthetic/*
 !synthetic/.gitkeep
 
 # Ignore OS and editor files

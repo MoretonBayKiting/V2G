@@ -36,7 +36,12 @@ from model import run_model, plot_res, Battery, Grid
 
 
 def export_df(df, filename):
-    df.to_csv(os.path.join(EXPORT_DIR, filename), index=False)
+    # df.to_csv(os.path.join(EXPORT_DIR, filename), index=False)
+    print(
+        f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
+    )
+    # Optionally, show the first few rows for debugging:
+    print(df.head(5))
 
 
 # Utility to get parameter from session state or fallback to default
@@ -50,11 +55,12 @@ def update_params(group, subgroup, edited_params):
     st.session_state["scenario"] = scenario
 
 
-DEFAULT_DATA = r"C:\Energy\V2G\data\V2g_scen1.json"
+DEFAULT_DATA = "data/inputs/V2g_scen1.json"
+DEFAULT_PRICE_PATH = "data/inputs/price_all_1h.csv"
 # os.makedirs(DEFAULT_DATA, exist_ok=True)
 EXPORT_DIR = r"C:\Energy\V2G\data\synthetic"
-os.makedirs(EXPORT_DIR, exist_ok=True)
-DEFAULT_PRICE_PATH = r"C:\Energy\V2G\data\NEM\price_all_1h.csv"
+# os.makedirs(EXPORT_DIR, exist_ok=True)
+
 used_battery_args = [
     "capacity_kwh",
     "max_charge_kw",

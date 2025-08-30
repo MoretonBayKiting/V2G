@@ -1,0 +1,28 @@
+
+# Ignore everything except Python files in src/
+*
+!.gitignore
+!requirements.txt
+!src/
+!src/**/*.py
+
+# Ignore Python cache and compiled files everywhere
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore Jupyter and Streamlit artifacts
+*.ipynb_checkpoints
+*.streamlit
+
+# Ignore common data and export directories
+data/
+!data/.gitkeep
+synthetic/
+!synthetic/.gitkeep
+
+# Ignore OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

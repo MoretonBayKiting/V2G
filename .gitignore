@@ -9,8 +9,8 @@
 
 # Allow JSON files in data/inputs/
 !data/inputs/
-!data/inputs/*.json
-!data/inputs/*.csv
+# !data/inputs/*.json
+# !data/inputs/*.csv
 
 # Ignore Python cache and compiled files everywhere
 __pycache__/
@@ -31,13 +31,13 @@ dist/
 *.egg-info/
 
 # Ignore all files in data and synthetic except .gitkeep and allowed .json
-data/*
-!data/inputs/
-!data/inputs/*.json
-!data/.gitkeep
+data/NEM/*
+data/processed/*
+data/SmartMeterData/*
+data/synthetic/*
+# !data/.gitkeep
 
-synthetic/*
-!synthetic/.gitkeep
+# !synthetic/.gitkeep
 
 # Ignore OS and editor files
 .DS_Store

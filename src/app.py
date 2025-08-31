@@ -70,8 +70,8 @@ def save_scenario_to_json(file_path="data/inputs/scenario_saved.json"):
 
 # DEFAULT_DATA = "data/inputs/V2g_scen1.json"
 # DEFAULT_PRICE_PATH = "data/inputs/price_all_1h.csv"
-INPUT_DIR = "data\inputs"
-PROCESSED_DIR = "data\processed"
+INPUT_DIR = "data/inputs"
+PROCESSED_DIR = "data/processed"
 # os.makedirs(DEFAULT_DATA, exist_ok=True)
 
 

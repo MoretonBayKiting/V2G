@@ -222,11 +222,14 @@ def export_df(df, filename):
         or os.environ.get("STREMLIT_CLOUD") is not None  # typo sometimes present
         or "streamlit" in os.environ.get("HOME", "").lower()
     )
-    if on_streamlit_cloud:
-        print(
-            f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
-        )
-        print(df.head(5))
-    else:
-        EXPORT_DIR = r"C:\Energy\V2G\data\synthetic"
-        df.to_csv(os.path.join(EXPORT_DIR, filename), index=False)
+    # if on_streamlit_cloud:
+    #     print(
+    #         f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
+    #     )
+    #     print(df.head(5))
+    # else:
+    #     EXPORT_DIR = r"C:\Energy\V2G\data\synthetic"
+    #     df.to_csv(os.path.join(EXPORT_DIR, filename), index=False)
+    print(
+        f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
+    )

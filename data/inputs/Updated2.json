@@ -44,21 +44,21 @@
       "cycle_eff_pct": 90
     },
     "grid": {
-      "network_cost_import_per_kwh": 0.15,
-      "network_cost_export_per_kwh": 0.05,
+      "network_cost_import_per_kwh": 0.25,
+      "network_cost_export_per_kwh": -0.0,
       "daily_fee": 1.0,
       "max_export_kw": 7.0
     },
-    "global":{
+    "global": {
       "kwh_per_km": 0.18,
       "min_price_threshold": 0.05,
       "start_date": "2024-07-01"
     }
   },
-    "paths":{
-      "data_paths":{
-        "price": "price_all_1h.csv",
-        "meter": "Exton202505.csv"
-      }
+  "paths": {
+    "data_paths": {
+      "price": "C:/Energy/V2G/data/NEM/price_all_1h.csv",
+      "meter": "C:/Energy/V2G/data/SmartMeterData/Exton202505.csv"
     }
+  }
 }

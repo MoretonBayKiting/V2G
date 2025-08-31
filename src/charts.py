@@ -68,7 +68,7 @@ def plot_energy_sankey(totals):
         ("PV", "Consumption", totals.loc["pv_to_consumption"]),
         ("PV", "Home Battery", totals.loc["home_batt_charge"]),
         ("PV", "Vehicle Battery", totals.loc["veh_batt_charge"]),
-        ("PV", "Export", totals.loc["grid_export"]),
+        ("PV", "Export", totals.loc["pv_export"]),
         ("PV", "Curtailment", totals.loc["curtailment"]),
         #
         (

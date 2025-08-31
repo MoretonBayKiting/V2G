@@ -293,12 +293,12 @@ def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
         excess_pv -= home_batt_charge
 
         # Grid export or curtail
-        grid_export = 0
+        pv_export = 0
         curtailment = 0
         if excess_pv > 0:
             if row.effective_export_price > 0:
-                grid_export = min(excess_pv, grid.max_export_kw)
-                excess_pv -= grid_export
+                pv_export = min(excess_pv, grid.max_export_kw)
+                excess_pv -= pv_export
             curtailment = excess_pv
 
         # Battery degradation
@@ -322,7 +322,7 @@ def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
                 "home_batt_loss": home_batt_loss,
                 "grid_import": grid_import,
                 "grid_import_cost": grid_import_cost,
-                "grid_export": grid_export,
+                "pv_export": pv_export,
                 "home_batt_charge": home_batt_charge,
                 "home_batt_discharge": home_batt_discharge,
                 "veh_batt_charge": veh_batt_charge,
@@ -336,7 +336,11 @@ def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
                 "unmet_vehicle_consumption": unmet_vehicle_consumption,
                 "home_export": home_export,
                 "vehicle_export": vehicle_export,
-                "export_earnings": grid_export
+                "pv_earnings": pv_export
+                * (row.price_kwh - grid.network_cost_export_per_kwh),
+                "veh_earnings": vehicle_export
+                * (row.price_kwh - grid.network_cost_export_per_kwh),
+                "home_earnings": home_export
                 * (row.price_kwh - grid.network_cost_export_per_kwh),
             }
         )

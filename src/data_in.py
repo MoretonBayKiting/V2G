@@ -1,6 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import random
+import os
 
 
 def load_meter_data(file):
@@ -211,3 +212,21 @@ def plot_volatility_timeseries(df, value_cols, season, week_start=None):
     ax.grid(True)
     plt.tight_layout()
     st.pyplot(fig)
+
+
+def export_df(df, filename):
+    # Detect if running on Streamlit Cloud
+    on_streamlit_cloud = (
+        os.environ.get("STREAMLIT_SERVER_HOST") is not None
+        or os.environ.get("STREAMLIT_CLOUD") is not None
+        or os.environ.get("STREMLIT_CLOUD") is not None  # typo sometimes present
+        or "streamlit" in os.environ.get("HOME", "").lower()
+    )
+    if on_streamlit_cloud:
+        print(
+            f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
+        )
+        print(df.head(5))
+    else:
+        EXPORT_DIR = r"C:\Energy\V2G\data\synthetic"
+        df.to_csv(os.path.join(EXPORT_DIR, filename), index=False)

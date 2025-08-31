@@ -57,8 +57,8 @@
   },
     "paths":{
       "data_paths":{
-        "price": "C:/Energy/V2G/data/NEM/price_all_1h.csv",
-        "meter": "C:/Energy/V2G/data/SmartMeterData/Exton202505.csv"
+        "price": "price_all_1h.csv",
+        "meter": "Exton202505.csv"
       }
     }
 }

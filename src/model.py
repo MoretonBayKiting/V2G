@@ -3,7 +3,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import plotly
-from data_in import combine_all_data, plot_volatility_timeseries
+import altair as alt
+from data_in import combine_all_data, plot_volatility_timeseries, export_df
 from charts import plot_energy_sankey
 
 
@@ -26,7 +27,8 @@ class Battery:
         self.max_discharge_kw = max_discharge_kw
         self.cycle_eff_pct = cycle_eff_pct
         self.name = name
-        self.soc_kwh = 0  # State of charge
+        # self.soc_kwh = 0  # State of charge
+        self.soc_kwh = capacity_kwh / 2
         self.soh = soh_init  # State of health (fraction, 1.0 = new)
         self.cal_deg_linear = cal_deg_linear
         self.cal_deg_sqrt = cal_deg_sqrt
@@ -78,62 +80,76 @@ class Grid:
         )
 
 
-# Example parameter setup
-# home_battery = Battery(
-#     capacity_kwh=13.5,
-#     max_charge_kw=5,
-#     max_discharge_kw=5,
-#     name="Home Battery",
-#     soh_init=1.0,
-#     cal_deg_linear=2e-4,
-#     cal_deg_sqrt=1e-4,
-#     cyc_deg_exp_drive=2.0,
-#     cyc_deg_exp_charge=1.5,
-# )
-# vehicle_battery = Battery(
-#     capacity_kwh=60,
-#     max_charge_kw=7,
-#     max_discharge_kw=7,
-#     name="Vehicle Battery",
-#     soh_init=1.0,
-#     cal_deg_linear=1e-4,
-#     cal_deg_sqrt=2e-4,
-#     cyc_deg_exp_drive=2.2,
-#     cyc_deg_exp_charge=1.3,
-# )
-# grid = Grid(
-#     network_cost_import_per_kwh=0.15,
-#     network_cost_export_per_kwh=0.05,
-#     daily_fee=1.0,
-#     max_export_kw=7,
-# )
+import time
 
 
-def calculate_vehicle_target_soc(
+def vectorized_target_soc(
     df_all,
-    current_time_idx,
+    load_components,
+    supply_components,
+    max_charge_rate=0,
+    min_price_threshold=0.0,
+    grid=None,
+    lookahead_hours=72,
+    plugged_in_key="plugged_in",
+):
+    start = time.time()
+    n = len(df_all)
+    load = np.zeros(n)
+    for comp in load_components:
+        load += df_all.get(comp, 0)
+    supply = np.zeros(n)
+    for comp in supply_components:
+        if comp == "pv_kwh":
+            supply += df_all.get("pv_kwh", 0)
+        elif comp == "cheap_grid":
+            prices = (
+                df_all["price"] / 1000 + grid.network_cost_import_per_kwh
+                if grid is not None
+                else df_all.get("price", 0)
+            )
+            cheap_grid_mask = prices < min_price_threshold
+            supply += cheap_grid_mask.astype(float) * max_charge_rate
+
+    # Only allow supply when plugged in
+    if plugged_in_key in df_all.columns:
+        plugged_in_mask = df_all[plugged_in_key].astype(float).values
+        supply = supply * plugged_in_mask
+
+    pad = np.zeros(lookahead_hours - 1)
+    load_padded = np.concatenate([load, pad])
+    supply_padded = np.concatenate([supply, pad])
+
+    windows_load = np.lib.stride_tricks.sliding_window_view(
+        load_padded, lookahead_hours
+    )
+    windows_supply = np.lib.stride_tricks.sliding_window_view(
+        supply_padded, lookahead_hours
+    )
+
+    # For each window, sum load and subtract supply in the first period only
+    sum_load = np.sum(windows_load, axis=1)
+    supply_first = windows_supply[:, 0]
+
+    target_soc = np.maximum(windows_load[:, 0], sum_load - supply_first)
+
+    elapsed = time.time() - start
+    print(
+        f"[LOG] vectorized_target_soc ({load_components}, {supply_components}) took {elapsed:.3f} seconds"
+    )
+    return target_soc[:n]
+
+
+def precompute_static_columns(
+    df_all,
     kwh_per_km,
-    max_charge_rate,
     min_price_threshold,
     grid,
+    home_battery,
+    vehicle_battery,
     lookahead_hours=72,
 ):
-    future = df_all.iloc[current_time_idx + 1 : current_time_idx + 1 + lookahead_hours]
-    total_trip_kwh = future["distance_km"].sum() * kwh_per_km
-
-    # Vectorized calculation of cheap import capacity
-    prices = future["price"] / 1000 + grid.network_cost_import_per_kwh
-    cheap_hours = (prices < min_price_threshold).sum()
-    cheap_import_capacity = cheap_hours * max_charge_rate
-
-    target_soc = max(total_trip_kwh - cheap_import_capacity, 0)
-    return target_soc
-
-
-def run_energy_flow_model(
-    df_all, home_battery, vehicle_battery, grid, kwh_per_km, min_price_threshold
-):
-    # Precompute static columns
+    start = time.time()
     df_all = df_all.fillna(0)
     df_all["price_kwh"] = df_all["price"] / 1000
     df_all["effective_import_price"] = (
@@ -149,6 +165,43 @@ def run_energy_flow_model(
         df_all["consumption_kwh"] - df_all["pv_to_consumption"]
     )
     df_all["vehicle_consumption"] = df_all["distance_km"] * kwh_per_km
+
+    print("[LOG] Starting vectorized target SoC calculations...")
+    target_soc_total = vectorized_target_soc(
+        df_all,
+        load_components=["consumption_kwh", "vehicle_consumption"],
+        supply_components=["pv_kwh", "cheap_grid"],
+        max_charge_rate=home_battery.max_charge_kw + vehicle_battery.max_charge_kw,
+        min_price_threshold=min_price_threshold,
+        grid=grid,
+        lookahead_hours=lookahead_hours,
+    )
+    target_soc_vehicle = vectorized_target_soc(
+        df_all,
+        load_components=["vehicle_consumption"],
+        supply_components=["pv_kwh"],
+        max_charge_rate=vehicle_battery.max_charge_kw,
+        lookahead_hours=lookahead_hours,
+    )
+    target_soc_home = vectorized_target_soc(
+        df_all,
+        load_components=["consumption_kwh"],
+        supply_components=["pv_kwh", "cheap_grid"],
+        max_charge_rate=home_battery.max_charge_kw,
+        min_price_threshold=min_price_threshold,
+        grid=grid,
+        lookahead_hours=lookahead_hours,
+    )
+
+    df_all["target_soc_total"] = target_soc_total
+    df_all["target_soc_vehicle"] = target_soc_vehicle
+    df_all["target_soc_home"] = target_soc_home
+    elapsed = time.time() - start
+    print(f"[LOG] precompute_static_columns took {elapsed:.3f} seconds")
+    return df_all
+
+
+def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
 
     results = []
     # Use itertuples for faster iteration
@@ -170,7 +223,8 @@ def run_energy_flow_model(
             driving_discharge, mode="drive"
         )
 
-        # Discharge vehicle battery if plugged in
+        unmet_vehicle_consumption = row.vehicle_consumption - driving_discharge
+        # Discharge vehicle battery to supply home consumption if plugged in
         veh_batt_discharge = 0
         if row.plugged_in:
             veh_batt_discharge = min(
@@ -181,6 +235,31 @@ def run_energy_flow_model(
             vehicle_battery.soc_kwh -= veh_batt_discharge
             remaining_consumption -= veh_batt_discharge
 
+        # Vehicle battery export to grid (if plugged in)
+        vehicle_export = 0
+        if row.plugged_in and row.effective_export_price > 0:
+            # Only export if SoC after export >= target
+            available_for_export = max(
+                vehicle_battery.soc_kwh - row.target_soc_vehicle, 0
+            )
+            vehicle_export = min(
+                available_for_export,
+                vehicle_battery.max_discharge_kw,
+                grid.max_export_kw,
+            )
+            vehicle_battery.soc_kwh -= vehicle_export
+
+        # Home battery export to grid
+        home_export = 0
+        if row.effective_export_price > 0:
+            available_for_export = max(home_battery.soc_kwh - row.target_soc_home, 0)
+            home_export = min(
+                available_for_export,
+                home_battery.max_discharge_kw,
+                grid.max_export_kw - vehicle_export,  # Don't exceed grid limit
+            )
+            home_battery.soc_kwh -= home_export
+
         # Grid import for unmet consumption
         grid_import = max(remaining_consumption, 0)
         grid_import_cost = grid_import * row.effective_import_price
@@ -188,23 +267,14 @@ def run_energy_flow_model(
         # Excess PV after consumption
         excess_pv = row.pv_kwh - row.pv_to_consumption
 
-        # Vehicle battery charging target
-        vehicle_target_soc = calculate_vehicle_target_soc(
-            df_all,
-            idx,
-            kwh_per_km,
-            vehicle_battery.max_charge_kw,
-            min_price_threshold,
-            grid,
-        )
         veh_batt_charge = 0
         if row.plugged_in:
-            needed_charge = max(vehicle_target_soc - vehicle_battery.soc_kwh, 0)
+            # needed_charge = max(vehicle_battery.capacity_kwh - vehicle_battery.soc_kwh, 0)
             veh_batt_charge = min(
                 vehicle_battery.max_charge_kw,
                 vehicle_battery.capacity_kwh - vehicle_battery.soc_kwh,
                 excess_pv,
-                needed_charge,
+                # needed_charge,
             )
             veh_batt_charge = veh_batt_charge * vehicle_battery.cycle_eff_pct / 100
             veh_batt_loss = veh_batt_charge * (1 - vehicle_battery.cycle_eff_pct / 100)
@@ -263,7 +333,9 @@ def run_energy_flow_model(
                 "home_batt_soh": home_battery.soh,
                 "veh_batt_soh": vehicle_battery.soh,
                 "driving_discharge": driving_discharge,
-                "vehicle_target_soc": vehicle_target_soc,
+                "unmet_vehicle_consumption": unmet_vehicle_consumption,
+                "home_export": home_export,
+                "vehicle_export": vehicle_export,
                 "export_earnings": grid_export
                 * (row.price_kwh - grid.network_cost_export_per_kwh),
             }
@@ -286,7 +358,7 @@ def run_energy_flow_model(
 # # %%
 
 
-def run_model(st):
+def run_model(st, home_battery, vehicle_battery, grid, min_price_threshold, kwh_per_km):
     df_all = st.session_state.get("df_all")
     required_keys = [
         "home_battery",
@@ -303,26 +375,33 @@ def run_model(st):
         st.warning(f"Missing model parameters: {', '.join(missing)}")
         return
 
+    df_all = precompute_static_columns(
+        df_all,
+        kwh_per_km,
+        min_price_threshold,
+        grid,
+        home_battery,
+        vehicle_battery,
+        lookahead_hours=72,
+    )
+    export_df(df_all, "df_all.csv")
     results_df = run_energy_flow_model(
         df_all,
         st.session_state["home_battery"],
         st.session_state["vehicle_battery"],
         st.session_state["grid"],
-        kwh_per_km=st.session_state["kwh_per_km"],
-        min_price_threshold=st.session_state["min_price_threshold"],
     )
 
     results_df["total_network_cost"] = (
         results_df["grid_import"] * st.session_state["grid"].network_cost_import_per_kwh
     )
     st.session_state["results_df"] = results_df
-    # Average Battery SoC
-    # results_df = st.session_state.get("results_df")
+
     if results_df is None:
         st.warning("No model results found. Please run the model first.")
         print("[DEBUG] results_df is missing or None in session_state.")
     else:
-        # Summarize totals for all relevant columns
+        # Summarize totals for relevant columns
         exclude_cols = [
             "timestamp",
             "season",
@@ -330,7 +409,8 @@ def run_model(st):
             "veh_batt_soc",
             "home_batt_soh",
             "veh_batt_soh",
-            "vehicle_target_soc",
+            "target_soc_vehicle",
+            "target_soc_home",
         ]
         numeric_cols = [
             col
@@ -340,27 +420,7 @@ def run_model(st):
         ]
         totals = results_df[numeric_cols].sum().to_frame(name="Total (kWh/$)")
         totals.index.name = "Metric"
-
-        # st.header("Total Energy and Cost Metrics")
-        # st.table(totals)
         return results_df
-
-        # st.header("Battery SoC Over Time")
-        # fig, ax = plt.subplots()
-        # ax.plot(
-        #     results_df["timestamp"],
-        #     results_df["home_batt_soc"],
-        #     label="Home Battery SoC",
-        # )
-        # ax.plot(
-        #     results_df["timestamp"],
-        #     results_df["veh_batt_soc"],
-        #     label="Vehicle Battery SoC",
-        # )
-        # ax.set_xlabel("Time")
-        # ax.set_ylabel("State of Charge (kWh)")
-        # ax.legend()
-        # st.pyplot(fig)
 
 
 def plot_res(st, df, chart_type, period="mthly"):
@@ -372,13 +432,6 @@ def plot_res(st, df, chart_type, period="mthly"):
             not in ["date", "hour", "season", "timestamp", "is_sunny", "plugged_in"]
             and pd.api.types.is_numeric_dtype(df[c])
         ]
-        # value_cols = st.multiselect(
-        #     "Select up to 3 series to plot",
-        #     value_candidates,
-        #     default=value_candidates[:1],
-        #     max_selections=3,
-        #     key="volatility_series_select",
-        # )
         if chart_type == "summary table":
             exclude_cols = [
                 "timestamp",
@@ -387,7 +440,6 @@ def plot_res(st, df, chart_type, period="mthly"):
                 "veh_batt_soc",
                 "home_batt_soh",
                 "veh_batt_soh",
-                "vehicle_target_soc",
                 "is_sunny",
                 "plugged_in",
                 "price",
@@ -396,6 +448,9 @@ def plot_res(st, df, chart_type, period="mthly"):
                 "remaining_consumption",
                 "price_kwh",
                 "month",
+                "target_soc_total",
+                "target_soc_vehicle",
+                "target_soc_home",
             ]
             numeric_cols = [
                 col
@@ -447,42 +502,82 @@ def plot_res(st, df, chart_type, period="mthly"):
             with col2:
                 st.markdown(right_html, unsafe_allow_html=True)
 
-            sankey_fig = plot_energy_sankey(totals["Total"])
+            # sankey_fig = plot_energy_sankey(totals["Total"])
+
+            sankey_fig, total_flow, double_counted_sum, net_flow = plot_energy_sankey(
+                totals["Total"]
+            )
             st.plotly_chart(sankey_fig, use_container_width=True)
+            st.write(f"Sum of flows: {total_flow:.2f} kWh")
+            st.write(f"Double counted: {double_counted_sum:.2f} kWh")
+            st.write(f"Net: {net_flow:.2f} kWh")
 
         else:
+            default_names = [
+                "unmet_vehicle_consumption",
+                "vehicle_consumption",
+                "driving_discharge",
+            ]
+            default_indices = [
+                i for i, c in enumerate(value_candidates) if c in default_names
+            ]
+            default_values = [value_candidates[i] for i in default_indices]
             value_cols = st.multiselect(
-                "Select up to 3 series to plot",
+                "Select series ",
                 value_candidates,
-                default=value_candidates[:1],
-                max_selections=3,
+                default=default_values,
+                # default=value_candidates[:1],
+                # max_selections=3,
                 key="volatility_series_select",
             )
             if chart_type == "weekly":
-                seasons = sorted(df["season"].unique())
-                season = st.selectbox("Select season", seasons, key="season_select")
+                # seasons = sorted(df["season"].unique())
+                # season = st.selectbox("Select season", seasons, key="season_select")
+                season = period  # period is passed to plot_res.  It is season for the weekly case.
                 if value_cols and season:
                     plot_volatility_timeseries(df, value_cols, season)
-            elif chart_type in ["sum", "avg"]:
+            elif chart_type in ["sum", "avg", "daily_avg"]:
                 if period == "mthly":
                     df["month"] = pd.to_datetime(df["date"]).dt.month
                     group_col = "month"
                 else:
                     group_col = "season"
-                agg_func = "sum" if chart_type == "sum" else "mean"
-                agg_df = df.groupby(group_col)[value_cols].agg(agg_func)
-                st.subheader(f"{agg_func.capitalize()} by {group_col.capitalize()}")
-                st.line_chart(agg_df)
-            elif chart_type == "daily_avg":
-                if period == "mthly":
-                    df["month"] = pd.to_datetime(df["date"]).dt.month
-                    group_col = "month"
+                if chart_type == "daily_avg":
+                    sum_df = df.groupby(group_col)[value_cols].sum()
+                    day_counts = df.groupby(group_col)["date"].nunique()
+                    plot_df = sum_df.div(day_counts, axis=0)
                 else:
-                    group_col = "season"
-                sum_df = df.groupby(group_col)[value_cols].sum()
-                day_counts = df.groupby(group_col)["date"].nunique()
-                daily_avg_df = sum_df.div(day_counts, axis=0)
-                st.subheader(f"Daily Average by {group_col.capitalize()}")
-                st.line_chart(daily_avg_df)
+                    agg_func = "sum" if chart_type == "sum" else "mean"
+                    plot_df = df.groupby(group_col)[value_cols].agg(agg_func)
+                # Unified seasonal plotting logic
+                if group_col == "season":
+                    season_order = ["Summer", "Autumn", "Winter", "Spring"]
+                    plot_df = plot_df.reindex(season_order)
+                    plot_df = plot_df.reset_index()
+                    melted = plot_df.melt(
+                        id_vars="season",
+                        value_vars=value_cols,
+                        var_name="variable",
+                        value_name="value",
+                    )
+                    chart = (
+                        alt.Chart(melted)
+                        .mark_line(point=True)
+                        .encode(
+                            x=alt.X("season:N", sort=season_order, title="Season"),
+                            y=alt.Y("value:Q", title="Value"),
+                            color=alt.Color("variable:N", title="Series"),
+                        )
+                    )
+                    st.subheader(
+                        f"{chart_type.replace('_', ' ').capitalize()} by Season"
+                    )
+                    st.altair_chart(chart, use_container_width=True)
+                else:
+                    st.subheader(
+                        f"{chart_type.replace('_', ' ').capitalize()} by Month"
+                    )
+                    st.line_chart(plot_df)
+
     else:
         st.info("No data available or season column missing.")

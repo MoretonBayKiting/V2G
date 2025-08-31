@@ -36,12 +36,33 @@ def boxplot_aggpd_season(df_long):
 import plotly.graph_objects as go
 
 
-def plot_energy_sankey(totals):
-    # Example: adjust these keys to match your actual totals index
-    sources = ["PV", "Grid", "Vehicle Battery", "Home Battery"]
-    sinks = ["Consumption", "Export", "Curtailment", "Vehicle Battery", "Home Battery"]
+# ...existing code...
 
-    # Map flows (example, adjust as needed)
+
+def sankey_energy_check(flows):
+    # List of internal battery flows to subtract (charge/discharge/losses)
+    double_counted_keys = [
+        ("PV", "Home Battery"),
+        ("PV", "Vehicle Battery"),
+        ("Vehicle Battery", "Driving Discharge"),
+        # ("Home Battery", "Consumption"),
+        # ("Home Battery", "Export"),
+        # ("Home Battery", "Home Battery Loss"),
+        # ("Vehicle Battery", "Consumption"),
+        # ("Vehicle Battery", "Vehicle Consumption"),
+        # ("Vehicle Battery", "Export"),
+        # ("Vehicle Battery", "Vehicle Battery Loss"),
+        # ("Vehicle Battery", "Driving Discharge"),
+    ]
+    double_counted_sum = sum(
+        val for src, dst, val in flows if (src, dst) in double_counted_keys
+    )
+    total_flow = sum(val for src, dst, val in flows)
+    net_flow = total_flow - double_counted_sum
+    return total_flow, double_counted_sum, net_flow
+
+
+def plot_energy_sankey(totals):
     flows = [
         # PV flows
         ("PV", "Consumption", totals.loc["pv_to_consumption"]),
@@ -49,14 +70,71 @@ def plot_energy_sankey(totals):
         ("PV", "Vehicle Battery", totals.loc["veh_batt_charge"]),
         ("PV", "Export", totals.loc["grid_export"]),
         ("PV", "Curtailment", totals.loc["curtailment"]),
+        #
+        (
+            "Unmet Vehicle Demand",
+            "Vehicle Consumption",
+            (
+                totals.loc["unmet_vehicle_consumption"]
+                if "unmet_vehicle_consumption" in totals.index
+                else 0
+            ),
+        ),
         # Grid flows
         ("Grid", "Consumption", totals.loc["grid_import"]),
         # Battery discharges
         ("Home Battery", "Consumption", totals.loc["home_batt_discharge"]),
         (
+            "Home Battery",
+            "Export",
+            totals.loc["home_export"] if "home_export" in totals.index else 0,
+        ),
+        (
+            "Home Battery",
+            "Home Battery Loss",
+            totals.loc["home_batt_loss"] if "home_batt_loss" in totals.index else 0,
+        ),
+        (
             "Vehicle Battery",
             "Consumption",
-            totals.loc["veh_batt_discharge"] + totals.loc["driving_discharge"],
+            totals.loc["veh_batt_discharge"],
+        ),
+        # (
+        #     "Vehicle Battery",
+        #     "Vehicle Consumption",
+        #     (
+        #         totals.loc["vehicle_consumption"]
+        #         if "vehicle_consumption" in totals.index
+        #         else 0
+        #     ),
+        # ),
+        (
+            "Vehicle Battery",
+            "Export",
+            totals.loc["vehicle_export"] if "vehicle_export" in totals.index else 0,
+        ),
+        (
+            "Vehicle Battery",
+            "Vehicle Battery Loss",
+            totals.loc["veh_batt_loss"] if "veh_batt_loss" in totals.index else 0,
+        ),
+        (
+            "Vehicle Battery",
+            "Driving Discharge",
+            (
+                totals.loc["driving_discharge"]
+                if "driving_discharge" in totals.index
+                else 0
+            ),
+        ),
+        (
+            "Driving Discharge",
+            "Vehicle Consumption",
+            (
+                totals.loc["driving_discharge"]
+                if "driving_discharge" in totals.index
+                else 0
+            ),
         ),
     ]
 
@@ -72,6 +150,9 @@ def plot_energy_sankey(totals):
         label=[f"{src}→{dst}" for src, dst, val in flows],
     )
 
+    # Energy check using flows
+    total_flow, double_counted_sum, net_flow = sankey_energy_check(flows)
+
     fig = go.Figure(
         go.Sankey(
             node=dict(
@@ -79,9 +160,15 @@ def plot_energy_sankey(totals):
                 thickness=20,
                 line=dict(color="black", width=0.5),
                 label=nodes,
+                # color="lightgray",
             ),
             link=link,
         )
     )
-    fig.update_layout(title_text="Annual Energy Flow Sankey Diagram", font_size=12)
-    return fig
+    fig.update_layout(
+        title_text="Energy Flow Sankey Diagram",
+        font=dict(size=18, color="black", family="Arial"),
+        # You can also try font_size=18 for older Plotly versions
+    )
+
+    return fig, total_flow, double_counted_sum, net_flow

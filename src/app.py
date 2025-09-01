@@ -167,6 +167,12 @@ else:
     group = None
     subgroup = None
 
+show_doc = st.sidebar.checkbox("Show Documentation", value=False)
+if show_doc:
+    with open("V2G.md", "r", encoding="utf-8") as f:
+        doc_text = f.read()
+    st.markdown(doc_text)
+
 # --- Main body ---
 if main_page_option == "edit parameters":
     params = scenario[group][subgroup]
@@ -243,7 +249,7 @@ if main_page_option == "edit parameters":
 
     # --- For debugging: show current scenario dict ---
     # st.success("Parameters updated.")
-    st.write("Current scenario:", scenario)
+    # st.write("Current scenario:", scenario)
 
     df = None
     if group == "generator_params":
@@ -272,9 +278,9 @@ if main_page_option == "edit parameters":
         if value_cols and season:
             plot_volatility_timeseries(df, value_cols, season)
 
-    else:
-        # st.info("No data available or season column missing.")
-        st.write("Current scenario:", scenario)
+    # else:
+    # st.info("No data available or season column missing.")
+    st.write("Current scenario - not editable:", scenario)
 
 elif main_page_option == "price data":
     st.header("Select Price Data File")
@@ -299,9 +305,9 @@ elif main_page_option == "price data":
             seasons = sorted(df_price["season"].unique())
             season = st.selectbox("Select season", seasons, key="season_select")
             plot_volatility_timeseries(df_price, ["price"], season)
-    else:
-        # st.info("No data available or season column missing.")
-        st.write("Current scenario:", scenario)
+    # else:
+    # st.info("No data available or season column missing.")
+    st.write("Current scenario - not editable:", scenario)
 elif main_page_option == "project model":
     st.header("Model Results")
     # Only run model if needed
@@ -326,7 +332,7 @@ elif main_page_option == "project model":
     with col1:
         chart_type = st.selectbox(
             "Chart Type",
-            ["summary table", "weekly", "single day", "sum", "avg", "daily_avg"],
+            ["summary table", "weekly", "single day", "daily_avg"],  # , "sum", "avg"],
             index=0,
             key="chart_type_select",
             help="Choose how to aggregate and display results",
@@ -350,3 +356,4 @@ elif main_page_option == "project model":
         )
 
     plot_res(st, results_df, chart_type, period)
+# st.write("Current scenario (not editable):", st.session_state["scenario"])

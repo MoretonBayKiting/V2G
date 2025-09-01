@@ -57,9 +57,12 @@ def sankey_energy_check(flows):
     double_counted_sum = sum(
         val for src, dst, val in flows if (src, dst) in double_counted_keys
     )
+
     total_flow = sum(val for src, dst, val in flows)
     net_flow = total_flow - double_counted_sum
-    return total_flow, double_counted_sum, net_flow
+    # total_source = sum(val for src, dst, val in flows if src in source)
+    # total_sink = sum(val for src, dst, val in flows if dst in sink)
+    return total_flow, double_counted_sum, net_flow  # , total_source, total_sink
 
 
 def plot_energy_sankey(totals):

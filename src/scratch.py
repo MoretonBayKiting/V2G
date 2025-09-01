@@ -90,4 +90,48 @@ def import_df(filename):
 
 
 # %%
-df = import_df("df_cons.csv")
+import pandas as pd
+from datetime import datetime, timedelta
+
+df = import_df("results_df.csv")
+vars = [
+    "date",
+    "hour",
+    "pv_kwh",
+    "consumption_kwh",
+    "target_soc_home",
+    "home_batt_soc",
+    "effective_import_price",
+    "effective_export_price",
+]
+df_trim = df[vars]
+start_date = datetime(2025, 3, 5)
+end_date = start_date + timedelta(days=1)
+df_trim["date"] = pd.to_datetime(df_trim["date"])
+rng = (df_trim["date"] >= start_date) & (df_trim["date"] < end_date)
+df_week = df_trim[rng].copy()
+print(df_week)
+# %%
+load = df_week["consumption_kwh"] * df_week["effective_import_price"]
+supply = df_week["pv_kwh"] * df_week["effective_export_price"] + df_week[
+    "consumption_kwh"
+] * (df_week["effective_import_price"] - df_week["effective_export_price"])
+
+lookahead_hours = 3
+pad = np.zeros(lookahead_hours - 1)
+load_padded = np.concatenate([load, pad])
+supply_padded = np.concatenate([supply, pad])
+
+windows_load = np.lib.stride_tricks.sliding_window_view(load_padded, lookahead_hours)
+windows_supply = np.lib.stride_tricks.sliding_window_view(
+    supply_padded, lookahead_hours
+)
+
+# %%
+# print(windows_load)
+
+sum_load = np.sum(windows_load, axis=1)
+supply_rest = np.sum(windows_supply[:, 1:], axis=1)
+target_soc = np.maximum(windows_load[:, 0], sum_load - supply_rest)
+
+# %%

@@ -31,7 +31,7 @@ from synthetic import (
     initialize_from_scenario,
 )
 
-from model import run_model, plot_res, export_df, Battery, Grid
+from model import run_model, plot_res, export_df, combine_all_data, Battery, Grid
 
 # from scenario import load_scenario, get_generator_param, get_system_param, get_data_path
 
@@ -104,6 +104,7 @@ if "scenario" not in st.session_state:
         Grid,
         used_battery_args,
     )
+    st.session_state["model_dirty"] = True
 else:
     scenario = st.session_state["scenario"]
 
@@ -134,6 +135,7 @@ if st.session_state.get("scenario_json_path") != scenario_json_path:
             used_battery_args,
         )
         st.success("Scenario loaded and parameters applied.")
+        st.session_state["model_dirty"] = True
     except Exception as e:
         st.error(f"Failed to load scenario: {e}")
 # Add download button for Scenario
@@ -241,7 +243,7 @@ if main_page_option == "edit parameters":
 
     # --- For debugging: show current scenario dict ---
     # st.success("Parameters updated.")
-    # st.write("Current scenario:", scenario)
+    st.write("Current scenario:", scenario)
 
     df = None
     if group == "generator_params":
@@ -312,7 +314,7 @@ elif main_page_option == "project model":
         grid = st.session_state.get("grid")
         kwh_per_km = st.session_state.get("kwh_per_km")
         min_price_threshold = st.session_state.get("min_price_threshold")
-
+        df_all = combine_all_data(st)
         results_df = run_model(
             st, home_battery, vehicle_battery, grid, min_price_threshold, kwh_per_km
         )
@@ -324,7 +326,7 @@ elif main_page_option == "project model":
     with col1:
         chart_type = st.selectbox(
             "Chart Type",
-            ["summary table", "weekly", "sum", "avg", "daily_avg"],
+            ["summary table", "weekly", "single day", "sum", "avg", "daily_avg"],
             index=0,
             key="chart_type_select",
             help="Choose how to aggregate and display results",
@@ -332,7 +334,7 @@ elif main_page_option == "project model":
     if st.session_state["chart_type_select"] == "summary table":
         period_options = ["totals", "daily_averages"]
         period_box_name = "Totals or averages"
-    elif st.session_state["chart_type_select"] == "weekly":
+    elif st.session_state["chart_type_select"] in ["weekly", "single day"]:
         period_options = ["Summer", "Autumn", "Winter", "Spring"]
         period_box_name = "Season"
     else:

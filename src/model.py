@@ -83,61 +83,102 @@ class Grid:
 import time
 
 
-def vectorized_target_soc(
-    df_all,
-    load_components,
-    supply_components,
-    max_charge_rate=0,
-    min_price_threshold=0.0,
-    grid=None,
-    lookahead_hours=72,
-    plugged_in_key="plugged_in",
+def vectorized_export_opportunity(
+    df, price_col="price_kwh", lookahead_hours=24, top_n=1
 ):
-    start = time.time()
-    n = len(df_all)
-    load = np.zeros(n)
-    for comp in load_components:
-        load += df_all.get(comp, 0)
-    supply = np.zeros(n)
-    for comp in supply_components:
-        if comp == "pv_kwh":
-            supply += df_all.get("pv_kwh", 0)
-        elif comp == "cheap_grid":
-            prices = (
-                df_all["price"] / 1000 + grid.network_cost_import_per_kwh
-                if grid is not None
-                else df_all.get("price", 0)
-            )
-            cheap_grid_mask = prices < min_price_threshold
-            supply += cheap_grid_mask.astype(float) * max_charge_rate
-
-    # Only allow supply when plugged in
-    if plugged_in_key in df_all.columns:
-        plugged_in_mask = df_all[plugged_in_key].astype(float).values
-        supply = supply * plugged_in_mask
-
+    """
+    Returns a boolean mask for each hour: True if price is among top_n in the lookahead window.
+    """
+    prices = df[price_col].values
+    n = len(prices)
     pad = np.zeros(lookahead_hours - 1)
-    load_padded = np.concatenate([load, pad])
-    supply_padded = np.concatenate([supply, pad])
+    prices_padded = np.concatenate([prices, pad])
+    windows = np.lib.stride_tricks.sliding_window_view(prices_padded, lookahead_hours)
+    export_mask = np.zeros(n, dtype=bool)
+    for i in range(n):
+        # Find indices of top_n prices in the window
+        top_indices = np.argpartition(windows[i], -top_n)[-top_n:]
+        # If current hour is among top_n, allow export
+        if 0 in top_indices:
+            export_mask[i] = True
+    return export_mask
 
-    windows_load = np.lib.stride_tricks.sliding_window_view(
-        load_padded, lookahead_hours
-    )
-    windows_supply = np.lib.stride_tricks.sliding_window_view(
-        supply_padded, lookahead_hours
-    )
 
-    # For each window, sum load and subtract supply in the first period only
-    sum_load = np.sum(windows_load, axis=1)
-    supply_first = windows_supply[:, 0]
+def rolling_partial_sums(arr, window):
+    """
+    For each index, returns the cumulative sums of the next 'window' values.
+    Example: arr = [1,2,3,4], window=3
+    Output: [[1,3,6], [2,5,9], [3,7,0], [4,0,0]]
+    (last rows padded with zeros)
+    """
+    n = len(arr)
+    pad = np.zeros(window - 1)
+    arr_padded = np.concatenate([arr, pad])
+    windows = np.lib.stride_tricks.sliding_window_view(arr_padded, window)
+    partial_sums = np.cumsum(windows, axis=1)
+    return partial_sums  # shape: (n, window)
 
-    target_soc = np.maximum(windows_load[:, 0], sum_load - supply_first)
 
-    elapsed = time.time() - start
-    print(
-        f"[LOG] vectorized_target_soc ({load_components}, {supply_components}) took {elapsed:.3f} seconds"
-    )
-    return target_soc[:n]
+import numpy as np
+
+
+def rolling_partial_dots(df, fields, window):
+    """
+    For each index, returns the cumulative sums of the element-wise product of the given fields
+    over the next 'window' values.
+    Example: fields = ["consumption_kwh", "effective_export_price"]
+    Output: shape (n, window)
+    """
+    arrs = [df[f].values for f in fields]
+    # Element-wise product
+    prod = np.prod(arrs, axis=0)
+    n = len(prod)
+    pad = np.zeros(window - 1)
+    prod_padded = np.concatenate([prod, pad])
+    windows = np.lib.stride_tricks.sliding_window_view(prod_padded, window)
+    partial_sums = np.cumsum(windows, axis=1)
+    return partial_sums  # shape: (n, window)
+
+
+def target_soc(
+    df_all,
+    weighted_components,  # e.g. [("p", ["consumption_kwh", "effective_import_price"]), ("n", ["pv_kwh", "effective_import_price"]), ...]
+    components,  # e.g. [("p", ["consumption_kwh"]), ("n", ["pv_kwh"])]
+    lookahead_hours=24,
+):
+    """
+    For each time step, computes the required SoC over the lookahead window,
+    using rolling partial sums of the element-wise product of fields.
+    weighted_components: list of tuples ("p"/"n", [fields...]) for price-weighted calculation
+    components: list of tuples ("p"/"n", [fields...]) for unweighted calculation
+    Returns: target_soc (np.ndarray, shape [n])
+    """
+    n = len(df_all)
+    # Compute weighted partial sums
+    if weighted_components is not None:
+        weighted_arrays = []
+        for sign, fields in weighted_components:
+            arr = rolling_partial_dots(df_all, fields, lookahead_hours)
+            if sign == "n":
+                arr = -arr
+            weighted_arrays.append(arr)
+        # Sum all weighted arrays to get the diff
+        diff = np.sum(weighted_arrays, axis=0)  # shape (n, lookahead_hours)
+        idx_max = np.argmax(diff, axis=1)  # shape (n,)
+
+    # Compute unweighted partial sums
+    unweighted_arrays = []
+    for sign, fields in components:
+        arr = rolling_partial_dots(df_all, fields, lookahead_hours)
+        if sign == "n":
+            arr = -arr
+        unweighted_arrays.append(arr)
+    temp = np.sum(unweighted_arrays, axis=0)  # shape (n, lookahead_hours)
+    if weighted_components is None:
+        idx_max = np.argmax(temp, axis=1)  # shape (n,)
+    # For each time step, select value at idx_max
+    target_soc = temp[np.arange(n), idx_max]
+    return target_soc
 
 
 def precompute_static_columns(
@@ -166,38 +207,39 @@ def precompute_static_columns(
     )
     df_all["vehicle_consumption"] = df_all["distance_km"] * kwh_per_km
 
-    print("[LOG] Starting vectorized target SoC calculations...")
-    target_soc_total = vectorized_target_soc(
-        df_all,
-        load_components=["consumption_kwh", "vehicle_consumption"],
-        supply_components=["pv_kwh", "cheap_grid"],
-        max_charge_rate=home_battery.max_charge_kw + vehicle_battery.max_charge_kw,
-        min_price_threshold=min_price_threshold,
-        grid=grid,
-        lookahead_hours=lookahead_hours,
+    df_all["vehicle_export_allowed"] = vectorized_export_opportunity(
+        df_all, price_col="price_kwh", lookahead_hours=24, top_n=24
     )
-    target_soc_vehicle = vectorized_target_soc(
-        df_all,
-        load_components=["vehicle_consumption"],
-        supply_components=["pv_kwh"],
-        max_charge_rate=vehicle_battery.max_charge_kw,
-        lookahead_hours=lookahead_hours,
-    )
-    target_soc_home = vectorized_target_soc(
-        df_all,
-        load_components=["consumption_kwh"],
-        supply_components=["pv_kwh", "cheap_grid"],
-        max_charge_rate=home_battery.max_charge_kw,
-        min_price_threshold=min_price_threshold,
-        grid=grid,
-        lookahead_hours=lookahead_hours,
+    df_all["home_export_allowed"] = vectorized_export_opportunity(
+        df_all, price_col="price_kwh", lookahead_hours=24, top_n=24
     )
 
-    df_all["target_soc_total"] = target_soc_total
+    target_soc_vehicle = target_soc(
+        df_all,
+        [
+            ("p", ["vehicle_consumption", "effective_import_price"]),
+            ("n", ["pv_kwh", "effective_export_price"]),
+        ],
+        [("p", ["vehicle_consumption"]), ("n", ["pv_kwh"])],
+        lookahead_hours=8,
+    )
+    target_soc_vehicle = np.clip(target_soc_vehicle, 0, vehicle_battery.capacity_kwh)
+
+    target_soc_home = target_soc(
+        df_all,
+        [
+            ("p", ["consumption_kwh", "effective_import_price"]),
+            ("n", ["pv_kwh", "effective_export_price"]),
+        ],
+        [("p", ["consumption_kwh"]), ("n", ["pv_kwh"])],
+        lookahead_hours=8,
+    )
+    target_soc_home = np.clip(target_soc_home, 0, home_battery.capacity_kwh)
+
+    # df_all["target_soc_total"] = target_soc_total
     df_all["target_soc_vehicle"] = target_soc_vehicle
     df_all["target_soc_home"] = target_soc_home
-    elapsed = time.time() - start
-    print(f"[LOG] precompute_static_columns took {elapsed:.3f} seconds")
+    # elapsed = time.time() - start
     return df_all
 
 
@@ -237,7 +279,11 @@ def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
 
         # Vehicle battery export to grid (if plugged in)
         vehicle_export = 0
-        if row.plugged_in and row.effective_export_price > 0:
+        if (
+            row.plugged_in
+            and row.effective_export_price > 0
+            and row.vehicle_export_allowed
+        ):
             # Only export if SoC after export >= target
             available_for_export = max(
                 vehicle_battery.soc_kwh - row.target_soc_vehicle, 0
@@ -251,7 +297,7 @@ def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
 
         # Home battery export to grid
         home_export = 0
-        if row.effective_export_price > 0:
+        if row.effective_export_price > 0 and row.home_export_allowed:
             available_for_export = max(home_battery.soc_kwh - row.target_soc_home, 0)
             home_export = min(
                 available_for_export,
@@ -267,30 +313,117 @@ def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
         # Excess PV after consumption
         excess_pv = row.pv_kwh - row.pv_to_consumption
 
+        # ...existing code...
+
+        # --- Vehicle battery charging: PV first, then grid if needed ---
         veh_batt_charge = 0
-        if row.plugged_in:
-            # needed_charge = max(vehicle_battery.capacity_kwh - vehicle_battery.soc_kwh, 0)
-            veh_batt_charge = min(
-                vehicle_battery.max_charge_kw,
+        veh_batt_loss = 0
+        veh_batt_charge_grid = 0
+        veh_batt_loss_grid = 0
+        if row.plugged_in > 0:
+            # Required charge to reach target SoC
+            required_charge = max(row.target_soc_vehicle - vehicle_battery.soc_kwh, 0)
+            # PV available for charging
+            pv_charge = min(
+                vehicle_battery.max_charge_kw * row.plugged_in,
                 vehicle_battery.capacity_kwh - vehicle_battery.soc_kwh,
                 excess_pv,
-                # needed_charge,
+                required_charge,
             )
-            veh_batt_charge = veh_batt_charge * vehicle_battery.cycle_eff_pct / 100
-            veh_batt_loss = veh_batt_charge * (1 - vehicle_battery.cycle_eff_pct / 100)
+            veh_batt_charge = pv_charge * vehicle_battery.cycle_eff_pct / 100
+            veh_batt_loss = pv_charge * (1 - vehicle_battery.cycle_eff_pct / 100)
             vehicle_battery.soc_kwh += veh_batt_charge
-            excess_pv -= veh_batt_charge
+            excess_pv -= pv_charge
+            required_charge -= pv_charge
 
-        # Home battery charging
-        home_batt_charge = min(
+            # If PV was insufficient, use grid import for the remainder
+            if required_charge > 0:
+                grid_charge = min(
+                    vehicle_battery.max_charge_kw * row.plugged_in,
+                    vehicle_battery.capacity_kwh - vehicle_battery.soc_kwh,
+                    required_charge,
+                )
+                veh_batt_charge_grid = grid_charge * vehicle_battery.cycle_eff_pct / 100
+                veh_batt_loss_grid = grid_charge * (
+                    1 - vehicle_battery.cycle_eff_pct / 100
+                )
+                vehicle_battery.soc_kwh += veh_batt_charge_grid
+                grid_import += grid_charge
+                veh_batt_charge += veh_batt_charge_grid
+                veh_batt_loss += veh_batt_loss_grid
+
+        # --- Home battery charging: PV first, then grid if needed ---
+        home_batt_charge = 0
+        home_batt_loss = 0
+        home_batt_charge_grid = 0
+        home_batt_loss_grid = 0
+        # Required charge to reach target SoC
+        required_charge_home = max(row.target_soc_home - home_battery.soc_kwh, 0)
+        # PV available for charging
+        pv_charge_home = min(
+            home_battery.max_charge_kw,
+            home_battery.capacity_kwh - home_battery.soc_kwh,
+            excess_pv,
+            required_charge_home,
+        )
+        home_batt_charge = pv_charge_home * home_battery.cycle_eff_pct / 100
+        home_batt_loss = pv_charge_home * (1 - home_battery.cycle_eff_pct / 100)
+        home_battery.soc_kwh += home_batt_charge
+        excess_pv -= pv_charge_home
+        required_charge_home -= pv_charge_home
+
+        # If PV was insufficient, use grid import for the remainder
+        if required_charge_home > 0:
+            grid_charge_home = min(
+                home_battery.max_charge_kw,
+                home_battery.capacity_kwh - home_battery.soc_kwh,
+                required_charge_home,
+            )
+            home_batt_charge_grid = grid_charge_home * home_battery.cycle_eff_pct / 100
+            home_batt_loss_grid = grid_charge_home * (
+                1 - home_battery.cycle_eff_pct / 100
+            )
+            home_battery.soc_kwh += home_batt_charge_grid
+            grid_import += grid_charge_home
+            home_batt_charge += home_batt_charge_grid
+            home_batt_loss += home_batt_loss_grid
+
+        extra_home_charge = min(
             home_battery.max_charge_kw,
             home_battery.capacity_kwh - home_battery.soc_kwh,
             excess_pv,
         )
-        home_batt_charge = home_batt_charge * home_battery.cycle_eff_pct / 100
-        home_batt_loss = home_batt_charge * (1 - home_battery.cycle_eff_pct / 100)
-        home_battery.soc_kwh += home_batt_charge
-        excess_pv -= home_batt_charge
+        if extra_home_charge > 0:
+            home_batt_charge_extra = (
+                extra_home_charge * home_battery.cycle_eff_pct / 100
+            )
+            home_batt_loss_extra = extra_home_charge * (
+                1 - home_battery.cycle_eff_pct / 100
+            )
+            home_battery.soc_kwh += home_batt_charge_extra
+            excess_pv -= extra_home_charge
+            home_batt_charge += home_batt_charge_extra
+            home_batt_loss += home_batt_loss_extra
+
+        # Then vehicle battery (if plugged in)
+        extra_vehicle_charge = 0
+        if row.plugged_in > 0:
+            extra_vehicle_charge = min(
+                vehicle_battery.max_charge_kw * row.plugged_in,
+                vehicle_battery.capacity_kwh - vehicle_battery.soc_kwh,
+                excess_pv,
+            )
+            if extra_vehicle_charge > 0:
+                veh_batt_charge_extra = (
+                    extra_vehicle_charge * vehicle_battery.cycle_eff_pct / 100
+                )
+                veh_batt_loss_extra = extra_vehicle_charge * (
+                    1 - vehicle_battery.cycle_eff_pct / 100
+                )
+                vehicle_battery.soc_kwh += veh_batt_charge_extra
+                excess_pv -= extra_vehicle_charge
+                veh_batt_charge += veh_batt_charge_extra
+                veh_batt_loss += veh_batt_loss_extra
 
         # Grid export or curtail
         pv_export = 0
@@ -336,12 +469,9 @@ def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
                 "unmet_vehicle_consumption": unmet_vehicle_consumption,
                 "home_export": home_export,
                 "vehicle_export": vehicle_export,
-                "pv_earnings": pv_export
-                * (row.price_kwh - grid.network_cost_export_per_kwh),
-                "veh_earnings": vehicle_export
-                * (row.price_kwh - grid.network_cost_export_per_kwh),
-                "home_earnings": home_export
-                * (row.price_kwh - grid.network_cost_export_per_kwh),
+                "pv_earnings": pv_export * row.effective_export_price,
+                "veh_earnings": vehicle_export * row.effective_export_price,
+                "home_earnings": home_export * row.effective_export_price,
             }
         )
 
@@ -386,7 +516,7 @@ def run_model(st, home_battery, vehicle_battery, grid, min_price_threshold, kwh_
         grid,
         home_battery,
         vehicle_battery,
-        lookahead_hours=72,
+        lookahead_hours=8,
     )
     export_df(df_all, "df_all.csv")
     results_df = run_energy_flow_model(
@@ -415,6 +545,8 @@ def run_model(st, home_battery, vehicle_battery, grid, min_price_threshold, kwh_
             "veh_batt_soh",
             "target_soc_vehicle",
             "target_soc_home",
+            "vehicle_export_allowed",
+            "home_export_allowed",
         ]
         numeric_cols = [
             col
@@ -449,12 +581,15 @@ def plot_res(st, df, chart_type, period="mthly"):
                 "price",
                 "hour",
                 "effective_import_price",
+                "effective_export_price",
                 "remaining_consumption",
                 "price_kwh",
                 "month",
                 "target_soc_total",
                 "target_soc_vehicle",
                 "target_soc_home",
+                "vehicle_export_allowed",
+                "home_export_allowed",
             ]
             numeric_cols = [
                 col
@@ -462,12 +597,69 @@ def plot_res(st, df, chart_type, period="mthly"):
                 if pd.api.types.is_numeric_dtype(df[col]) and col not in exclude_cols
             ]
 
-            totals = df[numeric_cols].sum().to_frame(name="Total")
             if period == "daily_averages":
                 totals = (df[numeric_cols].mean() * 24).to_frame(name="Total")
+            else:
+                totals = df[numeric_cols].sum().to_frame(name="Total")
             totals.index.name = "Metric"
 
-            totals_sorted = totals.sort_values(by="Total", ascending=False)
+            # Add these after totals is created and before sorting/formatting
+            def safe_divide(totals, num, denom):
+                num_val = totals.loc[num, "Total"] if num in totals.index else np.nan
+                denom_val = (
+                    totals.loc[denom, "Total"] if denom in totals.index else np.nan
+                )
+                return (
+                    100 * (num_val / denom_val)
+                    if denom_val not in [0, np.nan]
+                    else np.nan
+                )
+
+            totals.loc["veh_export_rate", "Total"] = safe_divide(
+                totals, "veh_earnings", "vehicle_export"
+            )
+            totals.loc["home_export_rate", "Total"] = safe_divide(
+                totals, "home_earnings", "home_export"
+            )
+            totals.loc["grid_import_rate", "Total"] = safe_divide(
+                totals, "grid_import_cost", "grid_import"
+            )
+            totals.loc["pv_export_rate", "Total"] = safe_divide(
+                totals, "pv_earnings", "pv_export"
+            )
+
+            totals_sort_order = [
+                "pv_kwh",
+                "grid_import",
+                "unmet_vehicle_consumption",
+                "consumption_kwh",
+                "vehicle_consumption",
+                "curtailment",
+                "vehicle_export",
+                "home_export",
+                "pv_export",
+                "home_batt_loss",
+                "veh_batt_loss",
+                "home_earnings",
+                "veh_earnings",
+                "pv_earnings",
+                "grid_import_cost",
+                "grid_import_rate",
+                "home_export_rate",
+                "veh_export_rate",
+                "pv_export_rate",
+            ]
+            # Get all metrics in totals
+            all_metrics = list(totals.index)
+            # Find metrics not in the explicit order
+            remaining_metrics = sorted(
+                [m for m in all_metrics if m not in totals_sort_order]
+            )
+            # Combine explicit order and remaining metrics
+            final_order = totals_sort_order + remaining_metrics
+            # Reindex totals to this order (missing metrics will be dropped, so ensure all are present)
+            totals_sorted = totals.reindex(final_order)
+            # totals_sorted = totals.sort_values(by="Total", ascending=False)
 
             # Split into two by size
             mid = len(totals_sorted) // 2
@@ -511,16 +703,42 @@ def plot_res(st, df, chart_type, period="mthly"):
             sankey_fig, total_flow, double_counted_sum, net_flow = plot_energy_sankey(
                 totals["Total"]
             )
+
+            source = ["pv_kwh", "grid_import", "unmet_vehicle_consumption"]
+            sink = [
+                "consumption_kwh",
+                "vehicle_consumption",
+                "curtailment",
+                "pv_export",
+                "vehicle_export",
+                "home_export",
+                "home_batt_loss",
+                "veh_batt_loss",
+            ]
+            total_source = sum(
+                totals.loc[s, "Total"] for s in source if s in totals.index
+            )
+            total_sink = sum(totals.loc[s, "Total"] for s in sink if s in totals.index)
             st.plotly_chart(sankey_fig, use_container_width=True)
             st.write(f"Sum of flows: {total_flow:.2f} kWh")
             st.write(f"Double counted: {double_counted_sum:.2f} kWh")
             st.write(f"Net: {net_flow:.2f} kWh")
+            st.write(f"Source: {total_source:.2f} kWh")
+            st.write(f"Sink: {total_sink:.2f} kWh")
 
         else:
+            # default_names = [
+            #     "unmet_vehicle_consumption",
+            #     "vehicle_consumption",
+            #     "driving_discharge",
+            # ]
             default_names = [
-                "unmet_vehicle_consumption",
-                "vehicle_consumption",
-                "driving_discharge",
+                "pv_kwh",
+                "grid_import",
+                "veh_batt_soc",
+                "home_batt_soc",
+                "target_soc_home",
+                "target_soc_vehicle",
             ]
             default_indices = [
                 i for i, c in enumerate(value_candidates) if c in default_names
@@ -534,12 +752,12 @@ def plot_res(st, df, chart_type, period="mthly"):
                 # max_selections=3,
                 key="volatility_series_select",
             )
-            if chart_type == "weekly":
+            if chart_type in ["weekly", "single day"]:
                 # seasons = sorted(df["season"].unique())
                 # season = st.selectbox("Select season", seasons, key="season_select")
                 season = period  # period is passed to plot_res.  It is season for the weekly case.
                 if value_cols and season:
-                    plot_volatility_timeseries(df, value_cols, season)
+                    plot_volatility_timeseries(df, value_cols, season, chart_type)
             elif chart_type in ["sum", "avg", "daily_avg"]:
                 if period == "mthly":
                     df["month"] = pd.to_datetime(df["date"]).dt.month

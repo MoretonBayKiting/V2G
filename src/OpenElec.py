@@ -71,6 +71,10 @@ with OEClient() as client:
 # %% 20250827 Get Qld wholesale price data
 import os
 
+# state = "QLD"
+state = "VIC"
+mth = 6
+yr = 2025
 os.environ["OPENELECTRICITY_API_KEY"] = "oe_3ZMnmVc4Dk7inpUS7jWA9Mpb"
 from datetime import datetime, timedelta
 import pandas as pd
@@ -81,10 +85,9 @@ from openelectricity.types import DataMetric, MarketMetric
 output_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "NEM")
 os.makedirs(output_dir, exist_ok=True)
 
-mth = 12
-start_date = datetime(2024, mth, 1, 0, 0, 0)
+start_date = datetime(yr, mth, 1, 0, 0, 0)
 # end_date = datetime(2025, 1, 31, 0, 0, 0)
-end_date = datetime(2024, mth, 30, 23, 59, 0)
+end_date = datetime(yr, mth, 30, 23, 59, 0)
 # start_date = end_date - timedelta(days=325)
 
 
@@ -116,7 +119,7 @@ async def fetch_data(startDt, endDt, price_data):
                 print("Result name:", result.name)
                 print("Number of data points:", len(result.data))
                 for point in result.data:
-                    if "QLD" in result.name or "QLD" in getattr(result, "region", ""):
+                    if state in result.name or state in getattr(result, "region", ""):
                         price_data.append(
                             {
                                 "timestamp": point.timestamp,
@@ -155,16 +158,17 @@ print(dir(types.MarketMetric))
 import glob
 
 # Path to monthly price files
-price_files = glob.glob(os.path.join(output_dir, "price??_1h.csv"))
-
+# price_files = glob.glob(os.path.join(output_dir, "priceVic??.csv"))
+price_files = glob.glob(os.path.join(output_dir, "priceVic_[0-9][0-9]_1h.csv"))
 dfs = []
 for file in sorted(price_files):
     df = pd.read_csv(file, usecols=["timestamp", "value"])
     dfs.append(df)
 
 df_all = pd.concat(dfs, ignore_index=True)
-df_all.to_csv(os.path.join(output_dir, "price_all_1h.csv"), index=False)
-print(f"Combined {len(price_files)} files into price_all_1h.csv")
+out_file_name = "priceVic.csv"
+df_all.to_csv(os.path.join(output_dir, out_file_name), index=False)
+print(f"Combined {len(price_files)} files into {out_file_name}")
 # %%
 # Add season and integral time.
 import pandas as pd
@@ -183,7 +187,7 @@ def get_season(dt):
         return "Spring"
 
 
-df_all = pd.read_csv(os.path.join(output_dir, "price_all_1h.csv"))
+df_all = pd.read_csv(os.path.join(output_dir, out_file_name))
 
 # Convert timestamp to datetime
 df_all["timestamp"] = pd.to_datetime(df_all["timestamp"])
@@ -195,6 +199,6 @@ df_all["interval"] = df_all["timestamp"].dt.hour
 df_all["season"] = df_all["timestamp"].apply(get_season)
 
 # Save updated CSV
-df_all.to_csv(os.path.join(output_dir, "price_all_1h.csv"), index=False)
-print("Added interval and season columns to price_all_1h.csv")
+df_all.to_csv(os.path.join(output_dir, out_file_name), index=False)
+print(f"Added interval and season columns to {out_file_name}")
 # %%

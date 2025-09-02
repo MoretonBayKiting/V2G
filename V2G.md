@@ -62,14 +62,26 @@ absent. For any reasonable size battery, this is unlikely to be an issue. Subseq
 
 - **driving:**  
    \*\*Menu to access: Main Actions (sidebar): [edit parameters] / [generator_params] / [driving]
-  There are a heap of magic numbers in the driving generation that will be exposed at some stage. They allow for stochastically generated numbers
-  of trips per day and timing of those trips during the day. They are different for weekdays and weekends. These will be tuned to allow, for
-  example, bimodal outings, one long outing (representing being out of the home to go to work) and various others. For now, live with what's there
-  and adjust the few parameters that you dare to get a reasonable estimate of your driving consumption. The timing and length of driving outings
-  is clearly important as that determines how much the vehicle can be charged from cheap solar etc....
-  _plugged_in_ is presently set to 1 if the vehicle is not on a trip and 0 otherwise (with fractions allowing for non-integral (mostly) trip periods). Distributional assumptions for this may be important...
+  There are parameters for up to 4 trips per day. They specify, stochastically,
 
-  Ignore any other parameters
+  - the probability of a trip happening;
+  - the (return) distance of such trip (and hence, through kwh_per_km, energy consumption)
+  - the time (hr) at which the trip occurs and
+  - the period the trip takes (return)
+  - whether the trip is on a weekday, weekend, or both
+    For example someone who commutes 3 weekdays per week, do a couple of short trips on the weekend and travels overnight once a month might have these parameters:
+
+          "probability": 0.42,  (3/7)   "probability": 0.8,        "probability": 0.025,
+          "weekday": true,              "weekday": false,          "weekday": true,
+          "weekend": false,             "weekend": true,           "weekend": false,
+          "distance_mean": 30.0,        "distance_mean": 10.0,     "distance_mean": 400.0,
+          "distance_std": 1.0,          "distance_std": 5.0,       "distance_std": 50.0,
+          "time_mean": 8.0,             "time_mean": 11.0,         "time_mean": 6.0,
+          "time_std": 0.2,              "time_std": 5.0,           "time_std": 0.1,
+          "length_mean": 9.0,           "length_mean": 2.0,        "length_mean": 36.0,
+          "length_std": 0.5             "length_std": 1.0          "length_std": 1.0
+
+  _plugged_in_ is presently set to 1 if the vehicle is not on a trip and 0 otherwise (with fractions allowing for non-integral (mostly) trip periods). Distributional assumptions for this may be important...for example, users who only plug in when they need a charge. But such users are not the target of this initial roll out of the model.
 
 - **PV:**  
   \*\*Menu to access: Main Actions (sidebar): [edit parameters] / [generator_params] / [pv]

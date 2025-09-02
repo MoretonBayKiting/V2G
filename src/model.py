@@ -472,6 +472,7 @@ def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
                 "pv_earnings": pv_export * row.effective_export_price,
                 "veh_earnings": vehicle_export * row.effective_export_price,
                 "home_earnings": home_export * row.effective_export_price,
+                "curtailment_op_cost": curtailment * row.effective_export_price,
             }
         )
 
@@ -627,76 +628,97 @@ def plot_res(st, df, chart_type, period="mthly"):
             totals.loc["pv_export_rate", "Total"] = safe_divide(
                 totals, "pv_earnings", "pv_export"
             )
-
-            totals_sort_order = [
-                "pv_kwh",
-                "grid_import",
-                "unmet_vehicle_consumption",
-                "consumption_kwh",
-                "vehicle_consumption",
-                "curtailment",
-                "vehicle_export",
-                "home_export",
-                "pv_export",
-                "home_batt_loss",
-                "veh_batt_loss",
-                "home_earnings",
-                "veh_earnings",
-                "pv_earnings",
-                "grid_import_cost",
-                "grid_import_rate",
-                "home_export_rate",
-                "veh_export_rate",
-                "pv_export_rate",
-            ]
-            # Get all metrics in totals
-            all_metrics = list(totals.index)
-            # Find metrics not in the explicit order
-            remaining_metrics = sorted(
-                [m for m in all_metrics if m not in totals_sort_order]
+            totals.loc["curtailment_rate", "Total"] = safe_divide(
+                totals, "curtailment_op_cost", "curtailment"
             )
-            # Combine explicit order and remaining metrics
-            final_order = totals_sort_order + remaining_metrics
-            # Reindex totals to this order (missing metrics will be dropped, so ensure all are present)
-            totals_sorted = totals.reindex(final_order)
-            # totals_sorted = totals.sort_values(by="Total", ascending=False)
 
-            # Split into two by size
-            mid = len(totals_sorted) // 2
-            left_table = totals_sorted.iloc[:mid]
-            right_table = totals_sorted.iloc[mid:]
+            metric_units = {
+                # kWh metrics
+                "pv_kwh": "kWh",
+                "grid_import": "kWh",
+                "unmet_vehicle_consumption": "kWh",
+                "consumption_kwh": "kWh",
+                "vehicle_consumption": "kWh",
+                "curtailment": "kWh",
+                "vehicle_export": "kWh",
+                "home_export": "kWh",
+                "pv_export": "kWh",
+                "home_batt_loss": "kWh",
+                "veh_batt_loss": "kWh",
+                # $ metrics
+                "home_earnings": "$",
+                "veh_earnings": "$",
+                "pv_earnings": "$",
+                "grid_import_cost": "$",
+                "curtailment_op_cost": "$",
+                "total_network_cost": "$",
+                # c metrics
+                "grid_import_rate": "c",
+                "home_export_rate": "c",
+                "veh_export_rate": "c",
+                "pv_export_rate": "c",
+                "curtailment_rate": "c",
+            }
 
-            # Format both tables
-            left_formatted = left_table.applymap(lambda x: f"{int(round(x)):,}")
-            right_formatted = right_table.applymap(lambda x: f"{int(round(x)):,}")
-            if period == "daily_averages":
-                left_formatted = left_table.applymap(lambda x: f"{x:,.2f}")
-                right_formatted = right_table.applymap(
-                    lambda x: f"{x:,.2f}"
-                )  # for table in [left_formatted, right_formatted]:
-            #     table.index.name = ""
-            #     table.columns = [""]
+            # Use metric_units keys for ordering
+            ordered_metrics = list(metric_units.keys())
 
-            # left_formatted.index.name = ""
-            # left_formatted.columns = [""]
-            # right_formatted.index.name = ""
-            # right_formatted.columns = [""]
+            tables = {"kWh": [], "$": [], "c": []}
+            for metric in ordered_metrics:
+                unit = metric_units[metric]
+                if metric in totals.index:
+                    tables[unit].append(metric)
 
-            left_html = left_formatted.to_html(
-                classes="styled-table", escape=False, header=False
-            )
-            left_html = left_html.replace("<td>", '<td style="text-align: right;">')
-            right_html = right_formatted.to_html(
-                classes="styled-table", escape=False, header=False
-            )
-            right_html = right_html.replace("<td>", '<td style="text-align: right;">')
+            # Display tables side-by-side
+            col_kwh, col_dollar, col_cents = st.columns(3)
+            for col, unit in zip([col_kwh, col_dollar, col_cents], ["kWh", "$", "c"]):
+                metrics = tables[unit]
+                if metrics:
+                    sub_totals = totals.loc[metrics].copy()
+                    sub_totals.index.name = f"Metric ({unit})"
+                    if unit == "kWh":
+                        formatted = sub_totals.applymap(
+                            # lambda x: f"{int(round(x)):,} {unit}"
+                            lambda x: f"{int(round(x)):,}"
+                        )
+                    elif unit == "$":
+                        formatted = sub_totals.applymap(
+                            lambda x: f"{unit}{int(round(x)):,}"
+                        )
+                    elif unit == "c":
+                        formatted = sub_totals.applymap(lambda x: f"{x:.2f}c")
+                    # col.subheader(f"{unit} Results")
+                    col.subheader(f"{unit} ")
+                    col.markdown(
+                        formatted.to_html(
+                            classes="styled-table", escape=False, header=False
+                        ),
+                        unsafe_allow_html=True,
+                    )
 
-            # Show side-by-side in Streamlit
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown(left_html, unsafe_allow_html=True)
-            with col2:
-                st.markdown(right_html, unsafe_allow_html=True)
+            # # Format both tables
+            # for unit, metrics in tables.items():
+            #     if metrics:
+            #         sub_totals = totals.loc[metrics].copy()
+            #         sub_totals.index.name = f"Metric ({unit})"
+            #         if unit == "kWh":
+            #             formatted = sub_totals.applymap(
+            #                 lambda x: f"{int(round(x)):,} "
+            #                 # lambda x: f"{int(round(x)):,} {unit}"
+            #             )
+            #         elif unit == "$":
+            #             formatted = sub_totals.applymap(
+            #                 lambda x: f"{unit}{int(round(x)):,} "
+            #             )
+            #         elif unit == "c":
+            #             formatted = sub_totals.applymap(lambda x: f"{x:.2f}{unit}")
+            #         st.subheader(f"{unit} Results")
+            #         st.markdown(
+            #             formatted.to_html(
+            #                 classes="styled-table", escape=False, header=False
+            #             ),
+            #             unsafe_allow_html=True,
+            #         )
 
             # sankey_fig = plot_energy_sankey(totals["Total"])
 
@@ -727,11 +749,6 @@ def plot_res(st, df, chart_type, period="mthly"):
             st.write(f"Sink: {total_sink:.2f} kWh")
 
         else:
-            # default_names = [
-            #     "unmet_vehicle_consumption",
-            #     "vehicle_consumption",
-            #     "driving_discharge",
-            # ]
             default_names = [
                 "pv_kwh",
                 "grid_import",

@@ -29,6 +29,7 @@ from synthetic import (
     cons_summary,
     autocast_params,
     initialize_from_scenario,
+    prepare_driving_params,
 )
 
 from model import run_model, plot_res, export_df, combine_all_data, Battery, Grid
@@ -45,6 +46,18 @@ from model import run_model, plot_res, export_df, combine_all_data, Battery, Gri
 # print(df.head(5))
 
 
+INPUT_DIR = "data/inputs"
+PROCESSED_DIR = "data/processed"
+
+
+def get_input_path(filename):
+    return os.path.join(INPUT_DIR, filename)
+
+
+def get_processed_path(filename):
+    return os.path.join(PROCESSED_DIR, filename)
+
+
 # Utility to get parameter from session state or fallback to default
 def get_param(key, default):
     return st.session_state.get(key, default)
@@ -56,31 +69,17 @@ def update_params(group, subgroup, edited_params):
     st.session_state["scenario"] = scenario
 
 
-def save_scenario_to_json(file_path="data/inputs/scenario_saved.json"):
+def save_scenario_to_json(filename):
     scenario = st.session_state.get("scenario")
     if scenario is None:
         st.warning("No scenario found in session state.")
         return
     # Ensure directory exists
+    file_path = get_input_path(filename)
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, "w") as f:
         json.dump(scenario, f, indent=2)
     st.success(f"Scenario saved to {file_path}")
-
-
-# DEFAULT_DATA = "data/inputs/V2g_scen1.json"
-# DEFAULT_PRICE_PATH = "data/inputs/price_all_1h.csv"
-INPUT_DIR = "data/inputs"
-PROCESSED_DIR = "data/processed"
-# os.makedirs(DEFAULT_DATA, exist_ok=True)
-
-
-def get_input_path(filename):
-    return os.path.join(INPUT_DIR, filename)
-
-
-def get_processed_path(filename):
-    return os.path.join(PROCESSED_DIR, filename)
 
 
 used_battery_args = [
@@ -89,12 +88,31 @@ used_battery_args = [
     "max_discharge_kw",
     "cycle_eff_pct",
 ]
+# st.set_page_config(layout="wide") ## This to fill the width
+# Add this near the top of your app.py  # Should control width using max_width: 1200px;  But that parameter seems not very effective.
+st.set_page_config(layout="wide")  ## This needed if following width control to be used.
+# Custom CSS for main container width
+st.markdown(
+    """
+    <style>
+    .block-container {
+        max-width: 1100px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+# ...existing code...
 # Initialise with default scenario into session state
+def_scen = "ForRobyn.json"
+def_price = "priceVic.csv"
 if "scenario" not in st.session_state:
     scenario = initialize_from_scenario(
         st,
-        get_input_path("V2g_scen1.json"),
-        get_input_path("price_all_1h.csv"),
+        get_input_path(def_scen),
+        get_input_path(def_price),
         export_df,
         autocast_params,
         generate_synthetic_driving,
@@ -112,11 +130,13 @@ else:
 # --- Sidebar controls ---
 st.sidebar.header("Scenario Management")
 scenario_json_path = st.sidebar.text_input(
-    "Scenario JSON file path", value=get_input_path("V2g_scen1.json")
+    "Scenario (JSON file)", value=get_input_path(def_scen).replace("\\", "/")
 )
-download_filename = st.sidebar.text_input(
-    "Download scenario as...", value="scenario_saved.json"
-)
+# download_filename = st.sidebar.text_input(
+#     "Download scenario as...", value="scenario_saved.json"
+# )
+# download_filename = get_input_path("???.csv").replace("\\", "/")
+download_filename = "???.csv"
 # Autoload scenario when text input changes
 if st.session_state.get("scenario_json_path") != scenario_json_path:
     st.session_state["scenario_json_path"] = scenario_json_path
@@ -124,7 +144,7 @@ if st.session_state.get("scenario_json_path") != scenario_json_path:
         scenario = initialize_from_scenario(
             st,
             scenario_json_path,
-            get_input_path("price_all_1h.csv"),
+            get_input_path(def_price),
             export_df,
             autocast_params,
             generate_synthetic_driving,
@@ -134,7 +154,7 @@ if st.session_state.get("scenario_json_path") != scenario_json_path:
             Grid,
             used_battery_args,
         )
-        st.success("Scenario loaded and parameters applied.")
+        # st.success("Scenario loaded and parameters applied.")
         st.session_state["model_dirty"] = True
     except Exception as e:
         st.error(f"Failed to load scenario: {e}")
@@ -143,7 +163,7 @@ scenario = st.session_state.get("scenario")
 if scenario is not None:
     scenario_json = json.dumps(scenario, indent=2)
     st.sidebar.download_button(
-        label="Download Scenario JSON",
+        label="Download Scenario",
         data=scenario_json,
         file_name=download_filename,
         mime="application/json",
@@ -154,7 +174,6 @@ st.sidebar.header("⚡ Main Actions")
 main_page_option = st.sidebar.selectbox(
     "Choose an action 👇",
     ["edit parameters", "price data", "project model"],
-    # ["edit parameters", "price data", "combine data", "project model"],
     key="main_page_option",
 )
 # ... parameter input code ...
@@ -179,20 +198,122 @@ if main_page_option == "edit parameters":
     edited_params = {}
 
     st.write(f"Editing parameters for: {group} → {subgroup}")
-    # Distribute parameter inputs in rows of up to 4 columns
-    param_items = list(params.items())
-    n_params = len(param_items)
-    cols_per_row = 4
+    # In main page, when editing driving parameters
+    if group == "generator_params" and subgroup == "driving":
+        trips = params.get("trips", [])
+        # ... input widgets for trip parameters ...
+        # ... update/add/delete/save buttons ...
+        # st.write("Current trip parameters:")
+        # for i, trip in enumerate(trips):
+        #     st.write(f"Trip {i}: {trip}")
+        trip_index = st.number_input(
+            "Trip Index (base 0)", min_value=0, max_value=max(0, len(trips)), value=0
+        )
 
-    for i in range(0, n_params, cols_per_row):
-        cols = st.columns(min(cols_per_row, n_params - i))
-        for j, (param, value) in enumerate(param_items[i : i + cols_per_row]):
-            with cols[j]:
-                if isinstance(value, (int, float)):
-                    new_value = st.number_input(param, value=float(value))
+        driving = st.session_state["scenario"]["generator_params"].get("driving", {})
+        if "trips" not in driving:
+            driving["trips"] = []
+
+        # UI for editing a single trip set
+        # Get current trip values if editing an existing trip
+        if trip_index < len(trips):
+            trip = trips[trip_index]
+        else:
+            trip = {}
+
+        cols = st.columns(4)
+        with cols[0]:
+            probability = st.number_input(
+                "Probability",
+                min_value=0.0,
+                max_value=1.0,
+                value=trip.get("probability", 0.8),
+            )
+            weekday = st.checkbox("Weekday", value=trip.get("weekday", True))
+            weekend = st.checkbox("Weekend", value=trip.get("weekend", True))
+        with cols[1]:
+            distance_mean = st.number_input(
+                "Distance Mean (km)", value=trip.get("distance_mean", 50.0)
+            )
+            distance_se = st.number_input(
+                "Distance Std Dev", value=trip.get("distance_std", 0.2)
+            )
+        with cols[2]:
+            time_mean = st.number_input(
+                "Time Mean (hour)", value=trip.get("time_mean", 8.0)
+            )
+            time_se = st.number_input("Time Std Dev", value=trip.get("time_std", 0.2))
+        with cols[3]:
+            length_mean = st.number_input(
+                "Length Mean (hr)", value=trip.get("length_mean", 2.0)
+            )
+            length_se = st.number_input(
+                "Length Std Dev", value=trip.get("length_std", 0.3)
+            )
+
+        # # Show all trip sets
+        # st.subheader("Current Trip Sets")
+        # trips = driving["trips"]
+        # for i, trip in enumerate(trips):
+        #     st.write(f"**Trip {i}:**", trip)
+        cols_1 = st.columns(2)
+        with cols_1[0]:
+            # Add/Update trip set
+            if st.button("Write/Update Trip Set"):
+                new_trip = {
+                    "probability": probability,
+                    "weekday": weekday,
+                    "weekend": weekend,
+                    "distance_mean": distance_mean,
+                    "distance_std": distance_se,
+                    "time_mean": time_mean,
+                    "time_std": time_se,
+                    "length_mean": length_mean,
+                    "length_std": length_se,
+                }
+                if trip_index < len(trips):
+                    trips[trip_index] = new_trip
+                    st.success(f"Trip {trip_index} updated.")
                 else:
-                    new_value = st.text_input(param, value=str(value))
-                edited_params[param] = new_value
+                    trips.append(new_trip)
+                    st.success(f"Trip {len(trips)-1} added.")
+                driving["trips"] = trips
+                st.session_state["scenario"]["generator_params"]["driving"] = driving
+
+        with cols_1[1]:
+            # Delete trip set
+            if st.button("Delete Trip Set"):
+                if 0 <= trip_index < len(trips):
+                    trips.pop(trip_index)
+                    st.success(f"Trip {trip_index} deleted.")
+                    driving["trips"] = trips
+                    st.session_state["scenario"]["generator_params"][
+                        "driving"
+                    ] = driving
+                else:
+                    st.warning("Invalid trip index for deletion.")
+
+        # Optionally, save scenario to file
+        # if st.button("Save Scenario"):
+        #     with open("data/inputs/V2g_scen1.json", "w") as f:
+        #         json.dump(st.session_state["scenario"], f, indent=2)
+        #     st.success("Scenario saved to V2g_scen1.json")
+
+    else:
+        # Distribute parameter inputs in rows of up to 4 columns
+        param_items = list(params.items())
+        n_params = len(param_items)
+        cols_per_row = 4
+
+        for i in range(0, n_params, cols_per_row):
+            cols = st.columns(min(cols_per_row, n_params - i))
+            for j, (param, value) in enumerate(param_items[i : i + cols_per_row]):
+                with cols[j]:
+                    if isinstance(value, (int, float)):
+                        new_value = st.number_input(param, value=float(value))
+                    else:
+                        new_value = st.text_input(param, value=str(value))
+                    edited_params[param] = new_value
 
     if st.button("Save changes & view profile"):
         update_params(group, subgroup, edited_params)
@@ -200,9 +321,17 @@ if main_page_option == "edit parameters":
         st.session_state["model_dirty"] = True
         if group == "generator_params":
             params = scenario[group][subgroup]
+            # if subgroup == "driving":
+            #     params = autocast_params(generate_synthetic_driving, params)
+            #     df_padded = generate_synthetic_driving(**params)
+            #     st.session_state["df_padded"] = df_padded
+            #     export_df(df_padded, "df_padded.csv")
             if subgroup == "driving":
-                params = autocast_params(generate_synthetic_driving, params)
-                df_padded = generate_synthetic_driving(**params)
+                driving_raw = params  # gen_params.get("driving", {})
+                driving_params = prepare_driving_params(
+                    driving_raw, autocast_params, generate_synthetic_driving
+                )
+                df_padded = generate_synthetic_driving(**driving_params)
                 st.session_state["df_padded"] = df_padded
                 export_df(df_padded, "df_padded.csv")
             elif subgroup == "pv":

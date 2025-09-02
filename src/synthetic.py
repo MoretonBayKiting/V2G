@@ -36,74 +36,123 @@ def autocast_params(func, params):
     return casted
 
 
+def prepare_driving_params(driving_raw, autocast_params, generate_synthetic_driving):
+    """
+    Prepare parameters for generate_synthetic_driving from scenario dict.
+    - driving_raw: dict from scenario["generator_params"]["driving"]
+    - autocast_params: function to cast types
+    - generate_synthetic_driving: function reference
+    Returns: dict of parameters for generate_synthetic_driving
+    """
+    trips = driving_raw.get("trips", [])
+    driving_params = {k: v for k, v in driving_raw.items() if k != "trips"}
+    driving_params["trip_sets"] = trips
+    driving_params = autocast_params(generate_synthetic_driving, driving_params)
+    return driving_params
+
+
 def generate_synthetic_driving(
     n_days=365,
-    trip_distance_mean=30,
-    trip_distance_logstd=0.4,
-    trip_period_mean=2,
-    trip_period_logstd=0.5,
-    trip_time_std=1,
+    trip_sets=None,
     start_date="2024-07-01",
     seed=42,
 ):
+    """
+    Generate synthetic driving data using multiple trip parameter sets.
+    trip_sets: list of dicts, each with keys:
+        - probability (float, 0-1)
+        - weekday (bool)
+        - weekend (bool)
+        - distance_mean (float)
+        - distance_logstd (float)
+        - time_mean (float, hour of day)
+        - time_std (float)
+        - length_mean (float, trip duration in hours)
+        - length_logstd (float)
+    """
     seed = int(seed)
     np.random.seed(seed)
     hours_per_day = 24
-    weekday_trip_probs = [0.2, 0.4, 0.3, 0.1]
-    weekend_trip_probs = [0.4, 0.4, 0.15, 0.05]
-    trip_distance_logmean = np.log(trip_distance_mean)
-    trip_period_logmean = np.log(trip_period_mean)
-    trip_time_means = {1: [10], 2: [8, 17], 3: [8, 13, 18]}
+    if trip_sets is None:
+        # Fallback to a default single trip set if not provided
+        trip_sets = [
+            {
+                "probability": 0.3,
+                "weekday": True,
+                "weekend": True,
+                "distance_mean": 30,
+                "distance_logstd": 0.4,
+                "time_mean": 8,
+                "time_std": 1,
+                "length_mean": 2,
+                "length_logstd": 0.5,
+            }
+        ]
 
     rows = []
     for day in range(n_days):
         date = pd.Timestamp(start_date) + pd.Timedelta(days=day)
         is_weekend = date.dayofweek >= 5
-        trip_probs = weekend_trip_probs if is_weekend else weekday_trip_probs
-        n_trips = np.random.choice([0, 1, 2, 3], p=trip_probs)
-        if n_trips > 0:
-            means = trip_time_means.get(n_trips, [13] * n_trips)
-            trip_hours = np.clip(np.random.normal(means, trip_time_std), 6, 22).astype(
-                int
+        trip_hours_today = []
+        for trip_set in trip_sets:
+            # Only consider trip sets valid for today (weekday/weekend)
+            if (is_weekend and trip_set.get("weekend", False)) or (
+                not is_weekend and trip_set.get("weekday", False)
+            ):
+                # Determine if this trip occurs today
+                if np.random.rand() < trip_set.get("probability", 0):
+                    # Draw trip time, distance, and period
+                    trip_hour = int(
+                        np.clip(
+                            np.random.normal(
+                                trip_set.get("time_mean", 13),
+                                trip_set.get("time_std", 1),
+                            ),
+                            0,
+                            23,
+                        )
+                    )
+                    trip_distance = np.clip(
+                        np.random.lognormal(
+                            np.log(trip_set.get("distance_mean", 30)),
+                            trip_set.get("distance_logstd", 0.4),
+                        ),
+                        2,
+                        300,
+                    )
+                    trip_period = np.clip(
+                        np.random.lognormal(
+                            np.log(trip_set.get("length_mean", 2)),
+                            trip_set.get("length_logstd", 0.5),
+                        ),
+                        0.5,
+                        48,
+                    )
+                    trip_hours_today.append(trip_hour)
+                    rows.append(
+                        {
+                            "date": date.date(),
+                            "hour": trip_hour,
+                            "distance_km": round(trip_distance, 1),
+                            "trip_period_hr": round(trip_period, 2),
+                            "plugged_in": 0,
+                        }
+                    )
+    # Fill in plugged_in=1 for all other hours
+    for h in range(hours_per_day):
+        if h not in trip_hours_today:
+            rows.append(
+                {
+                    "date": date.date(),
+                    "hour": h,
+                    "distance_km": 0,
+                    "trip_period_hr": 0,
+                    "plugged_in": 1,
+                }
             )
-            trip_distances = np.clip(
-                np.random.lognormal(
-                    trip_distance_logmean, trip_distance_logstd, n_trips
-                ),
-                2,
-                100,
-            )
-            trip_periods = np.clip(
-                np.random.lognormal(trip_period_logmean, trip_period_logstd, n_trips),
-                0.5,
-                8,
-            )
-            for h, d, p in zip(trip_hours, trip_distances, trip_periods):
-                rows.append(
-                    {
-                        "date": date.date(),
-                        "hour": h,
-                        "distance_km": round(d, 1),
-                        "trip_period_hr": round(p, 2),
-                        "plugged_in": 0,
-                    }
-                )
-        for h in range(hours_per_day):
-            if n_trips == 0 or h not in (trip_hours if n_trips > 0 else []):
-                rows.append(
-                    {
-                        "date": date.date(),
-                        "hour": h,
-                        "distance_km": 0,
-                        "trip_period_hr": 0,
-                        "plugged_in": 1,
-                    }
-                )
-    # df_padded = pd.DataFrame(rows)
     df_synth = pd.DataFrame(rows)
     df_expanded = expand_trips(df_synth[df_synth["distance_km"] > 0])
-    # df_padded = pad_expanded(df_expanded, start_date=st.session_state["start_date"], n_days=n_days)
-    df_padded = pad_expanded(df_expanded, start_date="2024-07-01", n_days=n_days)
+    df_padded = pad_expanded(df_expanded, start_date=start_date, n_days=n_days)
     df_padded["season"] = df_padded["date"].apply(get_season)
     df_padded = df_padded.sort_values(["date", "hour"]).reset_index(drop=True)
     return df_padded
@@ -446,8 +495,9 @@ def initialize_from_scenario(
     st.session_state["df_pv"] = df_pv
     export_df(df_pv, "df_pv.csv")
 
-    driving_params = autocast_params(
-        generate_synthetic_driving, gen_params.get("driving", {})
+    driving_raw = gen_params.get("driving", {})
+    driving_params = prepare_driving_params(
+        driving_raw, autocast_params, generate_synthetic_driving
     )
     df_padded = generate_synthetic_driving(**driving_params)
     st.session_state["df_padded"] = df_padded

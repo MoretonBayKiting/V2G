@@ -493,6 +493,12 @@ def initialize_from_scenario(
         scenario = json.load(f)
     print(f"[DEBUG] Scenario keys: {list(scenario.keys())}")
     st.session_state["scenario"] = scenario
+    # if "global" in scenario:
+    global_params = scenario["system_params"]["global"]
+    st.session_state["export_df_flag"] = global_params.get("export_df_flag", False)
+    st.session_state["public_charge_rate"] = global_params.get(
+        "public_charge_rate", False
+    )
 
     # --- Synthetic data ---
     gen_params = scenario.get("generator_params", {})
@@ -500,7 +506,7 @@ def initialize_from_scenario(
     pv_params = autocast_params(generate_synthetic_pv, gen_params.get("pv", {}))
     df_pv = generate_synthetic_pv(**pv_params)
     st.session_state["df_pv"] = df_pv
-    export_df(df_pv, "df_pv.csv")
+    export_df(st.session_state["export_df_flag"], df_pv, "df_pv.csv")
 
     driving_raw = gen_params.get("driving", {})
     print(f"[DEBUG] Driving raw: {driving_raw}")
@@ -512,7 +518,10 @@ def initialize_from_scenario(
         df_padded, df_drive_base = generate_synthetic_driving(**driving_params)
         st.session_state["df_padded"] = df_padded
         st.session_state["df_drive_base"] = df_drive_base
-        export_df(df_padded, "df_padded.csv")
+        export_df(st.session_state["export_df_flag"], df_padded, "df_padded.csv")
+        export_df(
+            st.session_state["export_df_flag"], df_drive_base, "df_drive_base.csv"
+        )
     except Exception as e:
         st.error(f"Error generating synthetic driving data: {e}")
         st.session_state["df_padded"] = pd.DataFrame()
@@ -523,7 +532,7 @@ def initialize_from_scenario(
     )
     df_cons = generate_synthetic_consumption(**cons_params)
     st.session_state["df_cons"] = df_cons
-    export_df(df_cons, "df_cons.csv")
+    export_df(st.session_state["export_df_flag"], df_cons, "df_cons.csv")
 
     # --- Price data ---
     if price_path and os.path.exists(price_path):
@@ -532,7 +541,7 @@ def initialize_from_scenario(
         df_price = df_price.rename(columns={"value": "price"})
         df_price["date"] = pd.to_datetime(df_price["timestamp"]).dt.date
         st.session_state["df_price"] = df_price
-        export_df(df_price, "df_price.csv")
+        export_df(st.session_state["export_df_flag"], df_price, "df_price.csv")
 
     # --- System params ---
     sys_params = scenario.get("system_params", {})

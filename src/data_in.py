@@ -159,11 +159,6 @@ def combine_all_data(st, export=True):
         )
     )
     st.session_state["df_all"] = df_all
-    # if export:
-    # print(
-    #     f"[combine_all_data] Exporting df_all to df_all.csv, shape: {df_all.shape}"
-    # )
-    # export_df(df_all, "df_all.csv")
     return df_all
 
 
@@ -243,7 +238,7 @@ def plot_volatility_timeseries(
     st.pyplot(fig)
 
 
-def export_df(df, filename):
+def export_df(export_flag, df, filename):
     # Detect if running on Streamlit Cloud
     # on_streamlit_cloud = (
     #     os.environ.get("STREAMLIT_SERVER_HOST") is not None
@@ -252,14 +247,10 @@ def export_df(df, filename):
     #     or "streamlit" in os.environ.get("HOME", "").lower()
     # )
     # if on_streamlit_cloud:
-    if True:
+    if export_flag:
+        EXPORT_DIR = r"C:\Energy\V2G\data\synthetic"
+        df.to_csv(os.path.join(EXPORT_DIR, filename), index=False)
+    else:
         print(
             f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
         )
-        print(df.head(5))
-    else:
-        EXPORT_DIR = r"C:\Energy\V2G\data\synthetic"
-        df.to_csv(os.path.join(EXPORT_DIR, filename), index=False)
-    # print(
-    #     f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
-    # )

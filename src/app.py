@@ -19,7 +19,7 @@ from data_in import (
     plot_volatility_timeseries,
 )
 
-from charts import plot_energy_sankey  # boxplot_interval, boxplot_aggpd_season
+# from charts import plot_energy_sankey  # boxplot_interval, boxplot_aggpd_season
 from synthetic import (
     generate_synthetic_driving,
     show_driving_summary,
@@ -35,16 +35,6 @@ from synthetic import (
 from model import run_model, plot_res, export_df, combine_all_data, Battery, Grid
 
 # from scenario import load_scenario, get_generator_param, get_system_param, get_data_path
-
-
-# def export_df(df, filename):
-# df.to_csv(os.path.join(EXPORT_DIR, filename), index=False)
-# print(
-#     f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
-# )
-# Optionally, show the first few rows for debugging:
-# print(df.head(5))
-
 
 INPUT_DIR = "data/inputs"
 PROCESSED_DIR = "data/processed"
@@ -106,7 +96,7 @@ st.markdown(
 )
 # ...existing code...
 # Initialise with default scenario into session state
-def_scen = "Vic.json"
+def_scen = "temp.json"
 def_price = "priceVic.csv"
 if "scenario" not in st.session_state:
     scenario = initialize_from_scenario(
@@ -321,11 +311,7 @@ if main_page_option == "edit parameters":
         st.session_state["model_dirty"] = True
         if group == "generator_params":
             params = scenario[group][subgroup]
-            # if subgroup == "driving":
-            #     params = autocast_params(generate_synthetic_driving, params)
-            #     df_padded = generate_synthetic_driving(**params)
-            #     st.session_state["df_padded"] = df_padded
-            #     export_df(df_padded, "df_padded.csv")
+
             if subgroup == "driving":
                 driving_raw = params  # gen_params.get("driving", {})
                 driving_params = prepare_driving_params(
@@ -334,17 +320,19 @@ if main_page_option == "edit parameters":
                 df_padded, df_drive_base = generate_synthetic_driving(**driving_params)
                 st.session_state["df_padded"] = df_padded
                 st.session_state["df_drive_base"] = df_drive_base
-                export_df(df_padded, "df_padded.csv")
+                export_df(
+                    st.session_state["export_df_flag"], df_padded, "df_padded.csv"
+                )
             elif subgroup == "pv":
                 params = autocast_params(generate_synthetic_pv, params)
                 df_pv = generate_synthetic_pv(**params)
                 st.session_state["df_pv"] = df_pv
-                export_df(df_pv, "df_pv.csv")
+                export_df(st.session_state["export_df_flag"], df_pv, "df_pv.csv")
             elif subgroup == "consumption":
                 params = autocast_params(generate_synthetic_consumption, params)
                 df_cons = generate_synthetic_consumption(**params)
                 st.session_state["df_cons"] = df_cons
-                export_df(df_cons, "df_cons.csv")
+                export_df(st.session_state["export_df_flag"], df_cons, "df_cons.csv")
 
         elif group == "system_params":
             params = scenario[group][subgroup]
@@ -373,9 +361,15 @@ if main_page_option == "edit parameters":
                 st.session_state["grid"] = grid
             if subgroup == "global":
                 # Assign global parameters to session_state for use in modelling
-                for k in ["kwh_per_km", "min_price_threshold", "start_date"]:
+                for k in [
+                    "kwh_per_km",
+                    "start_date",
+                    "public_charge_rate",
+                    "export_df_flag",
+                ]:
                     if k in params:
                         st.session_state[k] = params[k]
+                # st.checkbox["export_df_flag"] = params["export_df_flag"]
 
     # --- For debugging: show current scenario dict ---
     # st.success("Parameters updated.")
@@ -502,7 +496,7 @@ elif main_page_option == "price data":
         st.session_state["model_dirty"] = True
 
     if df_price is not None:
-        export_df(df_price, "df_price.csv")
+        export_df(st.session_state["export_df_flag"], df_price, "df_price.csv")
         if "season" in df_price.columns:
             st.subheader(
                 "Randomly selected weekly pricing to show volatility (by season)"
@@ -526,14 +520,12 @@ elif main_page_option == "project model":
         kwh_per_km = st.session_state.get("kwh_per_km")
         min_price_threshold = st.session_state.get("min_price_threshold")
         df_all = combine_all_data(st)
-        results_df = run_model(
-            st, home_battery, vehicle_battery, grid, min_price_threshold, kwh_per_km
-        )
+        results_df = run_model(st, home_battery, vehicle_battery, grid, kwh_per_km)
         st.session_state["model_dirty"] = False
     else:
         results_df = st.session_state["results_df"]
-    export_df(results_df, "results_df.csv")
-    col1, col2, col3 = st.columns(3)
+    export_df(st.session_state["export_df_flag"], results_df, "results_df.csv")
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         chart_type = st.selectbox(
             "Chart Type",
@@ -562,14 +554,38 @@ elif main_page_option == "project model":
     with col3:
         if chart_type in ["single day", "weekly"]:
             available_dates = sorted(results_df["date"].unique())
+            # Use session state to persist index
+            if "selected_date_idx" not in st.session_state:
+                st.session_state["selected_date_idx"] = 0
             selected_date = st.selectbox(
                 "Select date for single day chart",
                 available_dates,
-                index=0,
+                index=st.session_state["selected_date_idx"],
                 key="single_day_date_select",
             )
+            st.session_state["selected_date_idx"] = available_dates.index(selected_date)
         else:
             selected_date = None
+    inc = 1
+    # ...existing code...
+    with col4:
+        if chart_type in ["single day", "weekly"]:
+            if chart_type == "weekly":
+                inc = 7
+            prev_clicked = st.button("Previous", key="prev_btn")
+            next_clicked = st.button("Next", key="next_btn")
+            # Only update index if button was clicked
+            if prev_clicked and st.session_state["selected_date_idx"] > inc - 1:
+                st.session_state["selected_date_idx"] -= inc
+            if (
+                next_clicked
+                and st.session_state["selected_date_idx"] < len(available_dates) - inc
+            ):
+                st.session_state["selected_date_idx"] += inc
+            # Ensure selectbox reflects the updated index
+            selected_date = available_dates[st.session_state["selected_date_idx"]]
+            st.session_state["selected_date_idx"] = available_dates.index(selected_date)
+    # ...existing code...
 
     plot_res(st, results_df, chart_type, period, selected_date)
 # st.write("Current scenario (not editable):", st.session_state["scenario"])

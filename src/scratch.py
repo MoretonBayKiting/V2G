@@ -75,7 +75,7 @@ df_all = (
     )
 )
 
-# export_df(df_all, "df_all.csv")
+# export_df(True,df_all, "df_all.csv")
 # %%
 # modeldata = dfs["df_all"]
 # modeldata[modeldata["hour"] == 12]
@@ -136,14 +136,36 @@ target_soc = np.maximum(windows_load[:, 0], sum_load - supply_rest)
 
 # %%
 
-df_all = import_df("df_all.csv")
+# df_all = import_df("df_all.csv")
 results_df = import_df("results_df.csv")
-test = results_df.merge(df_all, on=["date", "hour"], how="left", suffixes=("", "_y"))
+# results_df already includes all relevant fields from df_all
+# test = results_df.merge(df_all, on=["date", "hour"], how="left", suffixes=("", "_y"))
 # Drop all columns from df_all that have the "_y" suffix (i.e., duplicates)
-test = test[[col for col in test.columns if not col.endswith("_y")]]
-test1 = test[test["date"] == "2024-07-07"]
+# test = test[[col for col in test.columns if not col.endswith("_y")]]
+# test1 = test[test["date"] == "2024-11-13"]
+test1 = results_df[results_df["date"] == "2024-11-13"]
+test1 = results_df[
+    (results_df["date"] == "2024-11-13") | (results_df["date"] == "2024-11-13")
+]
+test2 = test1[
+    [
+        "hour",
+        "veh_batt_soc",
+        "veh_batt_charge",
+        "veh_batt_charge_grid",
+        "veh_batt_charge_extra",
+        "veh_batt_discharge",
+        "vehicle_export",
+        "driving_discharge",
+        "plugged_in",
+        "price",
+    ]
+]
+# test2 = test2[(test2["hour"] > 15) & (test2["hour"] < 20)]
+test2 = test2[(test2["hour"] > 0) & (test2["hour"] < 24)]
 DIR = r"C:\Energy\V2G\data"
-test1.to_csv(os.path.join(DIR, "test1.csv"), index=False)
+# test1.to_csv(os.path.join(DIR, "test1.csv"), index=False)
+test2.to_csv(os.path.join(DIR, "test2.csv"), index=False)
 # %%
 import matplotlib.pyplot as plt
 

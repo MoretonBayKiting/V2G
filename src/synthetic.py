@@ -488,25 +488,35 @@ def initialize_from_scenario(
     import json
     import pandas as pd
 
+    print(f"[DEBUG] Loading scenario from: {scenario_path}")
     with open(scenario_path, "r") as f:
         scenario = json.load(f)
+    print(f"[DEBUG] Scenario keys: {list(scenario.keys())}")
     st.session_state["scenario"] = scenario
 
     # --- Synthetic data ---
     gen_params = scenario.get("generator_params", {})
+    print(f"[DEBUG] generator_params keys: {list(gen_params.keys())}")
     pv_params = autocast_params(generate_synthetic_pv, gen_params.get("pv", {}))
     df_pv = generate_synthetic_pv(**pv_params)
     st.session_state["df_pv"] = df_pv
     export_df(df_pv, "df_pv.csv")
 
     driving_raw = gen_params.get("driving", {})
+    print(f"[DEBUG] Driving raw: {driving_raw}")
     driving_params = prepare_driving_params(
         driving_raw, autocast_params, generate_synthetic_driving
     )
-    df_padded, df_drive_base = generate_synthetic_driving(**driving_params)
-    st.session_state["df_padded"] = df_padded
-    st.session_state["df_drive_base"] = df_drive_base
-    export_df(df_padded, "df_padded.csv")
+    print(f"[DEBUG] Driving params for generator: {driving_params}")
+    try:
+        df_padded, df_drive_base = generate_synthetic_driving(**driving_params)
+        st.session_state["df_padded"] = df_padded
+        st.session_state["df_drive_base"] = df_drive_base
+        export_df(df_padded, "df_padded.csv")
+    except Exception as e:
+        st.error(f"Error generating synthetic driving data: {e}")
+        st.session_state["df_padded"] = pd.DataFrame()
+        st.session_state["df_drive_base"] = pd.DataFrame()
 
     cons_params = autocast_params(
         generate_synthetic_consumption, gen_params.get("consumption", {})
@@ -558,4 +568,5 @@ def initialize_from_scenario(
         if k in global_params:
             st.session_state[k] = global_params[k]
 
+    print("[DEBUG] Scenario initialization complete.")
     return scenario

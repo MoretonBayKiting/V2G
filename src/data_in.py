@@ -252,7 +252,7 @@ def export_df(df, filename):
     #     or "streamlit" in os.environ.get("HOME", "").lower()
     # )
     # if on_streamlit_cloud:
-    if False:
+    if True:
         print(
             f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
         )

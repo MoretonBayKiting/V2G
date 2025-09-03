@@ -155,35 +155,39 @@ def generate_synthetic_driving(
     df_padded = pad_expanded(df_expanded, start_date=start_date, n_days=n_days)
     df_padded["season"] = df_padded["date"].apply(get_season)
     df_padded = df_padded.sort_values(["date", "hour"]).reset_index(drop=True)
-    return df_padded
+    return df_padded, df_synth
 
 
 #  --- Function to expand trips over multiple hours ---
 def expand_trips(df_trip):
-    """Expand each trip over its duration, distributing distance and plugged_in status."""
+    """Expand each trip over its duration, supporting multi-day trips."""
     expanded_rows = []
     for _, row in df_trip.iterrows():
-        start_hour = row["hour"]
+        start_date = pd.Timestamp(row["date"])
+        start_hour = int(row["hour"])
         period = row["trip_period_hr"]
         whole_hours = int(period)
         remainder = period - whole_hours
         distance_per_hour = row["distance_km"] / period if period > 0 else 0
-        # Full trip hours: driving whole hour, plugged_in=0
+
+        # Expand over whole hours
         for i in range(whole_hours):
+            dt = start_date + pd.Timedelta(hours=start_hour + i)
             expanded_rows.append(
                 {
-                    "date": row["date"],
-                    "hour": start_hour + i,
+                    "date": dt.date(),
+                    "hour": dt.hour,
                     "distance_km": round(distance_per_hour, 2),
                     "plugged_in": 0,
                 }
             )
-        # Partial last hour: driving for 'remainder', plugged_in for (1 - remainder)
+        # Partial last hour
         if remainder > 0:
+            dt = start_date + pd.Timedelta(hours=start_hour + whole_hours)
             expanded_rows.append(
                 {
-                    "date": row["date"],
-                    "hour": start_hour + whole_hours,
+                    "date": dt.date(),
+                    "hour": dt.hour,
                     "distance_km": round(distance_per_hour * remainder, 2),
                     "plugged_in": round(1 - remainder, 2),
                 }
@@ -228,7 +232,7 @@ def plot_plugged_in_distribution(df_expanded):
     return fig
 
 
-def show_driving_summary(df_padded, st):
+def show_driving_summary(df_padded, df_drive_base, st):
     """
     Display summary, charts, and download widgets for synthetic driving data in Streamlit.
     """
@@ -247,7 +251,7 @@ def show_driving_summary(df_padded, st):
     )
 
     fig, ax = plt.subplots()
-    df_trip = df_padded[df_padded["distance_km"] > 0]
+    df_trip = df_drive_base[df_drive_base["distance_km"] > 0]
     ax.hist(df_trip["distance_km"], bins=30, color="skyblue", edgecolor="black")
     ax.set_title("Trip Distances - (return to home)")
     ax.set_xlabel("Distance (km)")
@@ -499,8 +503,9 @@ def initialize_from_scenario(
     driving_params = prepare_driving_params(
         driving_raw, autocast_params, generate_synthetic_driving
     )
-    df_padded = generate_synthetic_driving(**driving_params)
+    df_padded, df_drive_base = generate_synthetic_driving(**driving_params)
     st.session_state["df_padded"] = df_padded
+    st.session_state["df_drive_base"] = df_drive_base
     export_df(df_padded, "df_padded.csv")
 
     cons_params = autocast_params(

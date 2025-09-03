@@ -135,3 +135,46 @@ supply_rest = np.sum(windows_supply[:, 1:], axis=1)
 target_soc = np.maximum(windows_load[:, 0], sum_load - supply_rest)
 
 # %%
+
+df_all = import_df("df_all.csv")
+results_df = import_df("results_df.csv")
+test = results_df.merge(df_all, on=["date", "hour"], how="left", suffixes=("", "_y"))
+# Drop all columns from df_all that have the "_y" suffix (i.e., duplicates)
+test = test[[col for col in test.columns if not col.endswith("_y")]]
+test1 = test[test["date"] == "2024-07-07"]
+DIR = r"C:\Energy\V2G\data"
+test1.to_csv(os.path.join(DIR, "test1.csv"), index=False)
+# %%
+import matplotlib.pyplot as plt
+
+# Assume test1 is already loaded and contains 'hour' and other columns
+value_vars = [
+    "pv_kwh",
+    "consumption_kwh",
+    "home_batt_soc",
+    "effective_import_price",
+]  # choose your variables
+value_vars = [
+    "pv_kwh",
+    "veh_batt_soc",
+    "vehicle_consumption",
+    "veh_batt_discharge",
+    "veh_batt_charge",
+    "target_soc_vehicle",
+    "grid_import",
+    "consumption_kwh",
+]
+plt.figure(figsize=(10, 6))
+for var in value_vars:
+    plt.plot(test1["hour"], test1[var], label=var)
+
+plt.xlabel("Hour")
+plt.ylabel("Value")
+plt.title("Variables by Hour for Selected Day")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+
+# %%

@@ -174,62 +174,73 @@ import matplotlib.pyplot as plt
 
 
 def plot_volatility_timeseries(
-    df, value_cols, season, chart_type="weekly", week_start=None, day=None
+    df, value_cols, season, week_start=None, chart_type="weekly", day=None
 ):
     import matplotlib.dates as mdates
 
     # Filter by season
-    df_season = df[df["season"] == season]
+    if season != "Any":
+        df_season = df[df["season"] == season]
+    else:
+        df_season = df
     unique_dates = sorted(df_season["date"].unique())
 
-    if chart_type == "single day":
-        # Pick a random day if not provided
-        if day is None:
-            day = random.choice(unique_dates)
-        df_day = df_season[df_season["date"] == day]
-        timestamps = pd.to_datetime(
-            df_day["date"].astype(str) + " " + df_day["hour"].astype(str) + ":00"
-        )
-        fig, ax = plt.subplots(figsize=(10, 4))
-        for col in value_cols:
-            ax.plot(timestamps, df_day[col], label=col)
-        ax.set_xticks(timestamps[::2])  # every 2 hours for clarity
-        ax.set_xticklabels([t.strftime("%H:%M") for t in timestamps[::2]])
-        ax.set_title(f"{season} day {day}")
-        ax.set_xlabel("Hour of Day")
-        ax.set_ylabel("Value")
-        ax.legend()
-        ax.grid(True)
-        plt.tight_layout()
-        st.pyplot(fig)
-    else:  # weekly (default)
-        # Find Sundays
+    if chart_type == "weekly":
+        plot_days = 7
         sundays = [d for d in unique_dates if pd.Timestamp(d).weekday() == 6]
         if len(sundays) == 0:
             st.warning("No Sundays found in this season's data.")
             return
-        # Pick a random Sunday as the start of the week
-        if week_start is None:
+            # Use provided week_start if given, else pick a random Sunday
+        if week_start is not None:
+            # Ensure week_start is a valid Sunday in the data
+            if week_start not in sundays:
+                # Find the nearest Sunday
+                nearest_sunday = min(
+                    sundays,
+                    key=lambda s: abs(
+                        (pd.Timestamp(s) - pd.Timestamp(week_start)).days
+                    ),
+                )
+                # st.warning(
+                #     f"Selected start day {week_start} is not a Sunday in this season. Using nearest Sunday: {nearest_sunday}."
+                # )
+                week_start = nearest_sunday
+        else:
             start_idx = random.randint(0, len(sundays) - 1)
             week_start = sundays[start_idx]
-        week_dates = pd.date_range(week_start, periods=7).date
-        df_week = df_season[df_season["date"].isin(week_dates)]
-        timestamps = pd.to_datetime(
-            df_week["date"].astype(str) + " " + df_week["hour"].astype(str) + ":00"
-        )
-        fig, ax = plt.subplots(figsize=(10, 4))
-        for col in value_cols:
-            ax.plot(timestamps, df_week[col], label=col)
-        days = pd.to_datetime(week_dates)
+    else:
+        plot_days = 1
+        if week_start is None:
+            week_start = random.choice(unique_dates)
+
+    plot_dates = pd.date_range(week_start, periods=plot_days).date
+    df_plot = df_season[df_season["date"].isin(plot_dates)]
+    timestamps = pd.to_datetime(
+        df_plot["date"].astype(str) + " " + df_plot["hour"].astype(str) + ":00"
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    for col in value_cols:
+        ax.plot(timestamps, df_plot[col], label=col)
+
+    if chart_type == "weekly":
+        days = pd.to_datetime(plot_dates)
         ax.set_xticks([d for d in days])
         ax.set_xticklabels([d.strftime("%a") for d in days])
-        ax.set_title(f" {season} week starting {week_start}")
+        ax.set_title(f"{season} week starting {week_start}")
         ax.set_xlabel("Day of Week")
-        ax.set_ylabel("Value")
-        ax.legend()
-        ax.grid(True)
-        plt.tight_layout()
-        st.pyplot(fig)
+    else:
+        ax.set_xticks(timestamps[::2])  # every 2 hours for clarity
+        ax.set_xticklabels([t.strftime("%H:%M") for t in timestamps[::2]])
+        ax.set_title(f"{season} day {week_start}")
+        ax.set_xlabel("Hour of Day")
+
+    ax.set_ylabel("Value")
+    ax.legend()
+    ax.grid(True)
+    plt.tight_layout()
+    st.pyplot(fig)
 
 
 def export_df(df, filename):
@@ -241,13 +252,14 @@ def export_df(df, filename):
     #     or "streamlit" in os.environ.get("HOME", "").lower()
     # )
     # if on_streamlit_cloud:
-    #     print(
-    #         f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
-    #     )
-    #     print(df.head(5))
-    # else:
-    #     EXPORT_DIR = r"C:\Energy\V2G\data\synthetic"
-    #     df.to_csv(os.path.join(EXPORT_DIR, filename), index=False)
-    print(
-        f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
-    )
+    if False:
+        print(
+            f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
+        )
+        print(df.head(5))
+    else:
+        EXPORT_DIR = r"C:\Energy\V2G\data\synthetic"
+        df.to_csv(os.path.join(EXPORT_DIR, filename), index=False)
+    # print(
+    #     f"[INFO] export_df called for '{filename}', but file writing is disabled in this environment."
+    # )

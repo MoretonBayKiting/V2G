@@ -106,7 +106,7 @@ st.markdown(
 )
 # ...existing code...
 # Initialise with default scenario into session state
-def_scen = "ForRobyn.json"
+def_scen = "Vic.json"
 def_price = "priceVic.csv"
 if "scenario" not in st.session_state:
     scenario = initialize_from_scenario(
@@ -331,8 +331,9 @@ if main_page_option == "edit parameters":
                 driving_params = prepare_driving_params(
                     driving_raw, autocast_params, generate_synthetic_driving
                 )
-                df_padded = generate_synthetic_driving(**driving_params)
+                df_padded, df_drive_base = generate_synthetic_driving(**driving_params)
                 st.session_state["df_padded"] = df_padded
+                st.session_state["df_drive_base"] = df_drive_base
                 export_df(df_padded, "df_padded.csv")
             elif subgroup == "pv":
                 params = autocast_params(generate_synthetic_pv, params)
@@ -384,7 +385,8 @@ if main_page_option == "edit parameters":
     if group == "generator_params":
         if subgroup == "driving" and "df_padded" in st.session_state:
             df = st.session_state["df_padded"]
-            show_driving_summary(df, st)
+            df_drive_base = st.session_state["df_drive_base"]
+            show_driving_summary(df, df_drive_base, st)
         elif subgroup == "pv" and "df_pv" in st.session_state:
             df = st.session_state["df_pv"]
             pv_summary(df, st)
@@ -393,10 +395,84 @@ if main_page_option == "edit parameters":
             cons_summary(df, st)
 
     # --- Season selection and volatility chart ---
+    # if df is not None and "season" in df.columns:
+    #     st.subheader("Short Time Series: Volatility by Season")
+    #     seasons = sorted(df["season"].unique())
+    #     cols_2 = st.columns(3)
+    #     with cols_2[0]:
+    #         season = st.selectbox("Select season", seasons, key="season_select")
+    #     if season != "Any"
+    #         df_season = df[df["season"] == season]
+    #     else:
+    #         df_season = df
+    #     # Assume you want to select by start index (e.g., week start)
+    #     available_starts = df_season["date"].unique()
+    #     # Button to resample week
+    #     if (
+    #         "vol_start_idx" not in st.session_state
+    #         or st.session_state.get("season_last") != season
+    #     ):
+    #         st.session_state["vol_start_idx"] = np.random.randint(
+    #             0, len(available_starts)
+    #         )
+    #         st.session_state["season_last"] = season
+    #     with cols_2[1]:
+    #         if st.button("Resample week"):
+    #             st.session_state["vol_start_idx"] = np.random.randint(
+    #                 0, len(available_starts)
+    #             )
+    #     # Use session state to persist random start across reruns
+    #     if (
+    #         "vol_start_idx" not in st.session_state
+    #         or st.session_state["season_select"] != season
+    #     ):
+    #         st.session_state["vol_start_idx"] = np.random.randint(
+    #             0, len(available_starts)
+    #         )
+    #     with cols_2[2]:
+    #         start_idx = st.number_input(
+    #             "Start Day Index",
+    #             min_value=0,
+    #             max_value=len(available_starts) - 1,
+    #             value=st.session_state["vol_start_idx"],
+    #             key="vol_start_idx_input",
+    #         )
+    #     start_day = available_starts[start_idx]
     if df is not None and "season" in df.columns:
         st.subheader("Short Time Series: Volatility by Season")
         seasons = sorted(df["season"].unique())
-        season = st.selectbox("Select season", seasons, key="season_select")
+        cols_2 = st.columns(3)
+        with cols_2[0]:
+            season = st.selectbox("Select season", seasons, key="season_select")
+        if season != "Any":
+            df_season = df[df["season"] == season]
+        else:
+            df_season = df
+        available_dates = sorted(df_season["date"].unique())
+        with cols_2[1]:
+            if st.button("Resample week"):
+                st.session_state["vol_selected_date"] = np.random.choice(
+                    available_dates
+                )
+        # Use session state to persist selected date across reruns
+        if (
+            "vol_selected_date" not in st.session_state
+            or st.session_state.get("season_last") != season
+        ):
+            st.session_state["vol_selected_date"] = available_dates[0]
+            st.session_state["season_last"] = season
+        with cols_2[2]:
+            selected_date = st.selectbox(
+                "Select date",
+                available_dates,
+                index=(
+                    available_dates.index(st.session_state["vol_selected_date"])
+                    if st.session_state["vol_selected_date"] in available_dates
+                    else 0
+                ),
+                key="vol_selected_date_select",
+            )
+            st.session_state["vol_selected_date"] = selected_date
         value_candidates = [
             c
             for c in df.columns
@@ -405,10 +481,10 @@ if main_page_option == "edit parameters":
         ]
         value_cols = value_candidates
         if value_cols and season:
-            plot_volatility_timeseries(df, value_cols, season)
+            plot_volatility_timeseries(df_season, value_cols, season, selected_date)
+        else:
+            st.info("No data available or season column missing.")
 
-    # else:
-    # st.info("No data available or season column missing.")
     st.write("Current scenario - not editable:", scenario)
 
 elif main_page_option == "price data":
@@ -457,7 +533,7 @@ elif main_page_option == "project model":
     else:
         results_df = st.session_state["results_df"]
     export_df(results_df, "results_df.csv")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         chart_type = st.selectbox(
             "Chart Type",
@@ -470,7 +546,7 @@ elif main_page_option == "project model":
         period_options = ["totals", "daily_averages"]
         period_box_name = "Totals or averages"
     elif st.session_state["chart_type_select"] in ["weekly", "single day"]:
-        period_options = ["Summer", "Autumn", "Winter", "Spring"]
+        period_options = ["Any", "Summer", "Autumn", "Winter", "Spring"]
         period_box_name = "Season"
     else:
         period_options = ["mthly", "season"]
@@ -483,6 +559,17 @@ elif main_page_option == "project model":
             key="period_select",
             help="Choose aggregation period for sum/avg",
         )
+    with col3:
+        if chart_type in ["single day", "weekly"]:
+            available_dates = sorted(results_df["date"].unique())
+            selected_date = st.selectbox(
+                "Select date for single day chart",
+                available_dates,
+                index=0,
+                key="single_day_date_select",
+            )
+        else:
+            selected_date = None
 
-    plot_res(st, results_df, chart_type, period)
+    plot_res(st, results_df, chart_type, period, selected_date)
 # st.write("Current scenario (not editable):", st.session_state["scenario"])

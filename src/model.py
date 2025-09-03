@@ -188,7 +188,7 @@ def precompute_static_columns(
     grid,
     home_battery,
     vehicle_battery,
-    lookahead_hours=72,
+    lookahead_hours=24,
 ):
     start = time.time()
     df_all = df_all.fillna(0)
@@ -221,7 +221,7 @@ def precompute_static_columns(
             ("n", ["pv_kwh", "effective_export_price"]),
         ],
         [("p", ["vehicle_consumption"]), ("n", ["pv_kwh"])],
-        lookahead_hours=8,
+        lookahead_hours=24,
     )
     target_soc_vehicle = np.clip(target_soc_vehicle, 0, vehicle_battery.capacity_kwh)
 
@@ -232,7 +232,7 @@ def precompute_static_columns(
             ("n", ["pv_kwh", "effective_export_price"]),
         ],
         [("p", ["consumption_kwh"]), ("n", ["pv_kwh"])],
-        lookahead_hours=8,
+        lookahead_hours=24,
     )
     target_soc_home = np.clip(target_soc_home, 0, home_battery.capacity_kwh)
 
@@ -248,7 +248,6 @@ def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
     results = []
     # Use itertuples for faster iteration
     for idx, row in enumerate(df_all.itertuples(index=False)):
-        # Stateful variables
         # Discharge home battery
         home_batt_discharge = min(
             home_battery.soc_kwh,
@@ -337,7 +336,7 @@ def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
             required_charge -= pv_charge
 
             # If PV was insufficient, use grid import for the remainder
-            if required_charge > 0:
+            if required_charge > 0 and veh_batt_discharge == 0:
                 grid_charge = min(
                     vehicle_battery.max_charge_kw * row.plugged_in,
                     vehicle_battery.capacity_kwh - vehicle_battery.soc_kwh,
@@ -560,7 +559,7 @@ def run_model(st, home_battery, vehicle_battery, grid, min_price_threshold, kwh_
         return results_df
 
 
-def plot_res(st, df, chart_type, period="mthly"):
+def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
     if df is not None and "season" in df.columns:
         value_candidates = [
             c
@@ -696,32 +695,6 @@ def plot_res(st, df, chart_type, period="mthly"):
                         unsafe_allow_html=True,
                     )
 
-            # # Format both tables
-            # for unit, metrics in tables.items():
-            #     if metrics:
-            #         sub_totals = totals.loc[metrics].copy()
-            #         sub_totals.index.name = f"Metric ({unit})"
-            #         if unit == "kWh":
-            #             formatted = sub_totals.applymap(
-            #                 lambda x: f"{int(round(x)):,} "
-            #                 # lambda x: f"{int(round(x)):,} {unit}"
-            #             )
-            #         elif unit == "$":
-            #             formatted = sub_totals.applymap(
-            #                 lambda x: f"{unit}{int(round(x)):,} "
-            #             )
-            #         elif unit == "c":
-            #             formatted = sub_totals.applymap(lambda x: f"{x:.2f}{unit}")
-            #         st.subheader(f"{unit} Results")
-            #         st.markdown(
-            #             formatted.to_html(
-            #                 classes="styled-table", escape=False, header=False
-            #             ),
-            #             unsafe_allow_html=True,
-            #         )
-
-            # sankey_fig = plot_energy_sankey(totals["Total"])
-
             sankey_fig, total_flow, double_counted_sum, net_flow = plot_energy_sankey(
                 totals["Total"]
             )
@@ -749,32 +722,58 @@ def plot_res(st, df, chart_type, period="mthly"):
             st.write(f"Sink: {total_sink:.2f} kWh")
 
         else:
+            # default_names = [
+            #     "pv_kwh",
+            #     "grid_import",
+            #     "veh_batt_soc",
+            #     "home_batt_soc",
+            #     "target_soc_home",
+            #     "target_soc_vehicle",
+            # ]
             default_names = [
                 "pv_kwh",
-                "grid_import",
                 "veh_batt_soc",
-                "home_batt_soc",
-                "target_soc_home",
+                "vehicle_consumption",
+                "veh_batt_discharge",
+                "veh_batt_charge",
                 "target_soc_vehicle",
             ]
-            default_indices = [
-                i for i, c in enumerate(value_candidates) if c in default_names
-            ]
-            default_values = [value_candidates[i] for i in default_indices]
             value_cols = st.multiselect(
                 "Select series ",
                 value_candidates,
-                default=default_values,
+                default=default_names,
                 # default=value_candidates[:1],
                 # max_selections=3,
                 key="volatility_series_select",
             )
             if chart_type in ["weekly", "single day"]:
-                # seasons = sorted(df["season"].unique())
-                # season = st.selectbox("Select season", seasons, key="season_select")
-                season = period  # period is passed to plot_res.  It is season for the weekly case.
+                season = period  # period is the season string
+                # value_candidates = [
+                #     c
+                #     for c in df.columns
+                #     if c not in ["date", "hour", "season", "timestamp"]
+                #     and pd.api.types.is_numeric_dtype(df[c])
+                # ]
+                # value_cols = value_candidates
                 if value_cols and season:
-                    plot_volatility_timeseries(df, value_cols, season, chart_type)
+                    if chart_type == "weekly":
+                        # selected_date is the week start date (Sunday)
+                        plot_volatility_timeseries(
+                            df,
+                            value_cols,
+                            season,
+                            week_start=selected_date,
+                            chart_type="weekly",
+                        )
+                    elif chart_type == "single day":
+                        # selected_date is the day to plot
+                        plot_volatility_timeseries(
+                            df,
+                            value_cols,
+                            season,
+                            week_start=selected_date,
+                            chart_type="single day",
+                        )
             elif chart_type in ["sum", "avg", "daily_avg"]:
                 if period == "mthly":
                     df["month"] = pd.to_datetime(df["date"]).dt.month

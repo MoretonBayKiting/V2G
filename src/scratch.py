@@ -133,6 +133,36 @@ windows_supply = np.lib.stride_tricks.sliding_window_view(
 sum_load = np.sum(windows_load, axis=1)
 supply_rest = np.sum(windows_supply[:, 1:], axis=1)
 target_soc = np.maximum(windows_load[:, 0], sum_load - supply_rest)
+# %%import numpy as np
+import matplotlib.pyplot as plt
+
+# Desired real-space mean and std
+mean_real = 300
+std_real = 100
+
+# Convert to log-space parameters
+variance_real = std_real**2
+mu = np.log(mean_real**2 / np.sqrt(variance_real + mean_real**2))
+sigma = np.sqrt(np.log(1 + variance_real / mean_real**2))
+
+# Generate samples
+samples = np.random.lognormal(mean=mu, sigma=sigma, size=10000)
+
+# Plot histogram
+plt.figure(figsize=(8, 4))
+plt.hist(samples, bins=50, color="skyblue", edgecolor="black", alpha=0.7)
+plt.title("Lognormal Distribution (mean=300, std=50)")
+plt.xlabel("Value")
+plt.ylabel("Frequency")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# Print sample mean and std for verification
+print(f"Sample mean: {samples.mean():.2f}")
+print(f"Sample std: {samples.std():.2f}")
+
+# %%
 
 # %%
 
@@ -143,7 +173,7 @@ results_df = import_df("results_df.csv")
 # Drop all columns from df_all that have the "_y" suffix (i.e., duplicates)
 # test = test[[col for col in test.columns if not col.endswith("_y")]]
 
-sample_date = "2024-07-05"  # "2024-11-13"
+sample_date = "2024-12-05"  # "2024-11-13"
 test1 = results_df[results_df["date"] == sample_date]
 # test1 = results_df[
 #     (results_df["date"] == sample_date) | (results_df["date"] == "2024-11-13")
@@ -174,150 +204,67 @@ test2 = test1[
         "veh_batt_charge",
         "public_charge_rate",
         "no_charging",
+        "positive_export_price",
         "effective_export_price",
+        "idx_max_veh",
     ]
 ]
 # test2 = test2[(test2["hour"] > 15) & (test2["hour"] < 20)]
-test2 = test2[(test2["hour"] > 5) & (test2["hour"] < 14)]
+# test2 = test2[(test2["hour"] > 5) & (test2["hour"] < 14)]
 
 DIR = r"C:\Energy\V2G\data"
 # test1.to_csv(os.path.join(DIR, "test1.csv"), index=False)
 test2.to_csv(os.path.join(DIR, "test2.csv"), index=False)
-# %%
-import matplotlib.pyplot as plt
-
-# Assume test1 is already loaded and contains 'hour' and other columns
-value_vars = [
-    "pv_kwh",
-    "consumption_kwh",
-    "home_batt_soc",
-    "effective_import_price",
-]  # choose your variables
-value_vars = [
-    "pv_kwh",
-    "veh_batt_soc",
-    "vehicle_consumption",
-    "veh_batt_discharge",
-    "veh_batt_charge",
-    "target_soc_vehicle",
-    "grid_import",
-    "consumption_kwh",
-]
-plt.figure(figsize=(10, 6))
-for var in value_vars:
-    plt.plot(test1["hour"], test1[var], label=var)
-
-plt.xlabel("Hour")
-plt.ylabel("Value")
-plt.title("Variables by Hour for Selected Day")
-plt.legend()
-plt.grid(True)
-plt.tight_layout()
-plt.show()
+df = test2
 
 
 # %%
 
-import numpy as np
-import matplotlib.pyplot as plt
-
-# Desired real-space mean and std
-mean_real = 300
-std_real = 100
-
-# Convert to log-space parameters
-variance_real = std_real**2
-mu = np.log(mean_real**2 / np.sqrt(variance_real + mean_real**2))
-sigma = np.sqrt(np.log(1 + variance_real / mean_real**2))
-
-# Generate samples
-samples = np.random.lognormal(mean=mu, sigma=sigma, size=10000)
-
-# Plot histogram
-plt.figure(figsize=(8, 4))
-plt.hist(samples, bins=50, color="skyblue", edgecolor="black", alpha=0.7)
-plt.title("Lognormal Distribution (mean=300, std=50)")
-plt.xlabel("Value")
-plt.ylabel("Frequency")
-plt.grid(True)
-plt.tight_layout()
-plt.show()
-
-# Print sample mean and std for verification
-print(f"Sample mean: {samples.mean():.2f}")
-print(f"Sample std: {samples.std():.2f}")
-
-# %%
 # Test target_soc calculations
 import pandas as pd
 import numpy as np
+from model import rolling_partial_dots
 
 # Load the sample CSV
 df = test2
-
-# Choose window size (e.g., 4 for a small test)
-window = 4
-
-# Fields to inspect
-p_fields = ["vehicle_consumption", "public_charge_rate", "no_charging"]
+#  As above but use rolling_partial_dots() (from model)
+window = 24
+# rng = [5:12]
+p_fields = ["vehicle_consumption", "public_charge_rate"]
 n_fields = ["pv_kwh", "effective_export_price", "allow_charge"]
-
-
-# Compute element-wise product
-def win(fields):
-    prod = np.prod([df[f].values for f in fields], axis=0)
-
-    # Pad and create sliding windows
-    pad = np.zeros(window - 1)
-    prod_padded = np.concatenate([prod, pad])
-    windows = np.lib.stride_tricks.sliding_window_view(prod_padded, window)
-
-    # Print sliding windows for review
-    print("Sliding windows of product:")
-    print(windows)
-
-    # Print cumulative sums for each window
-    partial_sums = np.cumsum(windows, axis=1)
-    print("Cumulative sums for each window:")
-    print(partial_sums)
-    return partial_sums
-
-
-p_part = win(p_fields)
-n_part = win(n_fields)
-# win(fields)
-# %%
-
-
-def rolling_partial_dots(df, fields, window):
-    """
-    For each index, returns the cumulative sums of the element-wise product of the given fields
-    over the next 'window' values.
-    Example: fields = ["consumption_kwh", "effective_export_price"]
-    Output: shape (n, window)
-    """
-    arrs = [df[f].values for f in fields]
-    # Element-wise product
-    prod = np.prod(arrs, axis=0)
-    n = len(prod)
-    pad = np.zeros(window - 1)
-    prod_padded = np.concatenate([prod, pad])
-    windows = np.lib.stride_tricks.sliding_window_view(prod_padded, window)
-    partial_sums = np.cumsum(windows, axis=1)
-    return partial_sums  # shape: (n, window)
-
-
-# %%
-fields = n_fields
-window = 6
-n_sum = rolling_partial_dots(df, fields, window)
-n_sum
+p_sum = rolling_partial_dots(df, p_fields, window)
+n_sum = rolling_partial_dots(df, n_fields, window)
 weighted_arrays = []
 weighted_arrays.append(p_sum)
 n_sum = -n_sum
 weighted_arrays.append(n_sum)
 diff = np.sum(weighted_arrays, axis=0)
 idx_max = np.argmax(diff, axis=1)
+p_fields2 = ["vehicle_consumption", "no_charging"]
+n_fields2 = ["pv_kwh", "positive_export_price", "allow_charge"]
+p_sum = rolling_partial_dots(df, p_fields2, window)
+n_sum = rolling_partial_dots(df, n_fields2, window)
+unweighted_arrays = []
+unweighted_arrays.append(p_sum)
+# n_sum = -n_sum
+unweighted_arrays.append(-n_sum)
+temp = np.sum(unweighted_arrays, axis=0)
+np.maximum(temp[np.arange(len(df)), idx_max], 0)
+print(idx_max)
+target_soc = np.maximum(temp[np.arange(len(df)), idx_max], 0)
+# target_soc = temp[np.arange(len(df)), idx_max]
+id = 6
+print(f"Weighted arrays and diff")
+print(weighted_arrays[0][id, :])
+print(weighted_arrays[1][id, :])
+print(diff[id])
+print(f"Unweighted arrays  and temp (diff)")
+print(unweighted_arrays[0][id, :])
+print(unweighted_arrays[1][id, :])
+print(temp[id])
+print(f"idx_max and target_soc")
+print(idx_max)
+print(target_soc)
 # %%
 
 

@@ -188,8 +188,9 @@ def target_soc(
     if weighted_components is None:
         idx_max = np.argmax(temp, axis=1)  # shape (n,)
     # For each time step, select value at idx_max
-    target_soc = temp[np.arange(n), idx_max]
-    return target_soc
+    # target_soc = temp[np.arange(n), idx_max]
+    target_soc = np.maximum(temp[np.arange(n), idx_max], 0)
+    return target_soc, idx_max
 
 
 def precompute_static_columns(
@@ -238,22 +239,26 @@ def precompute_static_columns(
     df_all["no_charging"] = np.ceil(
         df_all["not_plugged_in"]
     )  # Count all consumption in a partly plugged in period
+    # df_all["export_price_sign"] = (df_all["effective_export_price"] > 0).astype(int)
+    df_all["positive_export_price"] = np.maximum(df_all["effective_export_price"], 0)
 
-    target_soc_vehicle = target_soc(
+    target_soc_vehicle, idx_max_veh = target_soc(
         df_all,
         [
-            ("p", ["vehicle_consumption", "public_charge_rate", "no_charging"]),
+            # ("p", ["vehicle_consumption", "public_charge_rate", "no_charging"]),
+            ("p", ["vehicle_consumption", "public_charge_rate"]),
             ("n", ["pv_kwh", "effective_export_price", "allow_charge"]),
         ],
         [
-            ("p", ["vehicle_consumption", "no_charging"]),
-            ("n", ["pv_kwh", "allow_charge"]),
+            # ("p", ["vehicle_consumption", "no_charging"]),
+            ("p", ["vehicle_consumption"]),
+            ("n", ["pv_kwh", "positive_export_price", "allow_charge"]),
         ],
         lookahead_hours=24,
     )
     target_soc_vehicle = np.clip(target_soc_vehicle, 0, vehicle_battery.capacity_kwh)
 
-    target_soc_home = target_soc(
+    target_soc_home, idx_max_home = target_soc(
         df_all,
         [
             ("p", ["consumption_kwh", "effective_import_price"]),
@@ -266,6 +271,8 @@ def precompute_static_columns(
 
     df_all["target_soc_vehicle"] = target_soc_vehicle
     df_all["target_soc_home"] = target_soc_home
+    df_all["idx_max_home"] = idx_max_home
+    df_all["idx_max_veh"] = idx_max_veh
 
     return df_all
 

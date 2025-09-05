@@ -241,40 +241,6 @@ def plot_volatility_timeseries(
     cols = ["date", "hour"] + value_cols
     st.write(df_plot[cols])
 
-    # fig, ax = plt.subplots(figsize=(10, 4))
-    # bar_width = 0.8 / len(value_cols)  # Adjust bar width for number of series
-    # x = np.arange(len(timestamps))
-
-    # for i, col in enumerate(value_cols):
-    #     ax.bar(
-    #         x + i * bar_width,
-    #         df_plot[col].values,
-    #         width=bar_width,
-    #         label=col,
-    #         alpha=0.7,
-    #     )
-
-    # ax.set_xticks(x + bar_width * (len(value_cols) - 1) / 2)
-    # ax.set_xticklabels(
-    #     [
-    #         t.strftime("%a") if chart_type == "weekly" else t.strftime("%H:%M")
-    #         for t in timestamps
-    #     ]
-    # )
-
-    # if chart_type == "weekly":
-    #     ax.set_title(f"{season} week starting {week_start}")
-    #     ax.set_xlabel("Day of Week")
-    # else:
-    #     ax.set_title(f"{season} day {week_start}")
-    #     ax.set_xlabel("Hour of Day")
-
-    # ax.set_ylabel("Value")
-    # ax.legend()
-    # ax.grid(True)
-    # plt.tight_layout()
-    # st.pyplot(fig)
-
 
 def export_df(export_flag, df, filename):
     # Detect if running on Streamlit Cloud

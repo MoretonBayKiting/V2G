@@ -578,4 +578,5 @@ def initialize_from_scenario(
             st.session_state[k] = global_params[k]
 
     print("[DEBUG] Scenario initialization complete.")
+    st.session_state["model_dirty"] = True
     return scenario

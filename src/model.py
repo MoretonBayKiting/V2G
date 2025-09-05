@@ -46,13 +46,16 @@ class Battery:
         return self.cal_deg_linear * t_hours + self.cal_deg_sqrt * (t_hours**0.5)
 
     def cycling_degradation(self, power_kw, mode="charge"):
-        if mode == "charge":
-            exp = self.cyc_deg_exp_charge
-        elif mode == "drive":
-            exp = self.cyc_deg_exp_drive
-        else:  # "discharge"
-            exp = self.cyc_deg_exp_drive
-        return (abs(power_kw) / self.capacity_kwh) ** exp
+        if self.capacity_kwh > 0:
+            if mode == "charge":
+                exp = self.cyc_deg_exp_charge
+            elif mode == "drive":
+                exp = self.cyc_deg_exp_drive
+            else:  # "discharge"
+                exp = self.cyc_deg_exp_drive
+            return (abs(power_kw) / self.capacity_kwh) ** exp
+        else:
+            return 0
 
     def __repr__(self):
         return (
@@ -156,9 +159,12 @@ def target_soc(
     using rolling partial sums of the element-wise product of fields.
     weighted_components: list of tuples ("p"/"n", [fields...]) for price-weighted calculation
     components: list of tuples ("p"/"n", [fields...]) for unweighted calculation
+    The period over which the battery should be charged is that for which the cost  (partial sum of price weighted energy) is highest. idx_max identifies that period.
+    The energy required is that which can be supplied in that period - use idx_max to find that energy from the unweighted partial sum.
     Returns: target_soc (np.ndarray, shape [n])
     """
     n = len(df_all)
+
     # Compute weighted partial sums
     if weighted_components is not None:
         weighted_arrays = []
@@ -187,6 +193,7 @@ def target_soc(
 
 
 def precompute_static_columns(
+    st,
     df_all,
     kwh_per_km,
     grid,
@@ -223,13 +230,25 @@ def precompute_static_columns(
         top_n=home_battery.export_good_price_periods,
     )
 
+    df_all["public_charge_rate"] = st.session_state["public_charge_rate"]
+    df_all["allow_charge"] = np.floor(
+        df_all["plugged_in"]
+    )  # Don't allow charging in part periods
+    df_all["not_plugged_in"] = 1 - df_all["plugged_in"]
+    df_all["no_charging"] = np.ceil(
+        df_all["not_plugged_in"]
+    )  # Count all consumption in a partly plugged in period
+
     target_soc_vehicle = target_soc(
         df_all,
         [
-            ("p", ["vehicle_consumption", "effective_import_price", "plugged_in"]),
-            ("n", ["pv_kwh", "effective_export_price"]),
+            ("p", ["vehicle_consumption", "public_charge_rate", "no_charging"]),
+            ("n", ["pv_kwh", "effective_export_price", "allow_charge"]),
         ],
-        [("p", ["vehicle_consumption"]), ("n", ["pv_kwh"])],
+        [
+            ("p", ["vehicle_consumption", "no_charging"]),
+            ("n", ["pv_kwh", "allow_charge"]),
+        ],
         lookahead_hours=24,
     )
     target_soc_vehicle = np.clip(target_soc_vehicle, 0, vehicle_battery.capacity_kwh)
@@ -245,14 +264,13 @@ def precompute_static_columns(
     )
     target_soc_home = np.clip(target_soc_home, 0, home_battery.capacity_kwh)
 
-    # df_all["target_soc_total"] = target_soc_total
     df_all["target_soc_vehicle"] = target_soc_vehicle
     df_all["target_soc_home"] = target_soc_home
-    # elapsed = time.time() - start
+
     return df_all
 
 
-def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
+def run_energy_flow_model(st, df_all, home_battery, vehicle_battery, grid):
 
     results = []
     # Use itertuples for faster iteration
@@ -273,14 +291,22 @@ def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
             driving_discharge, mode="drive"
         )
 
-        unmet_vehicle_consumption = row.vehicle_consumption - driving_discharge
+        public_charge = row.vehicle_consumption - driving_discharge
         # Discharge vehicle battery to supply home consumption if plugged in
         veh_batt_discharge = 0
-        if row.plugged_in:
+        # Only supply load if SoC after export >= target or present price exceeds public charge rate
+        if st.session_state["public_charge_rate"] < row.effective_export_price:
+            available_for_discharge = max(
+                vehicle_battery.soc_kwh - row.target_soc_vehicle, 0
+            )
+        else:
+            available_for_discharge = 0
+        if row.plugged_in > 0:
             veh_batt_discharge = min(
                 vehicle_battery.soc_kwh,
-                vehicle_battery.max_discharge_kw,
+                vehicle_battery.max_discharge_kw * row.plugged_in,
                 remaining_consumption,
+                available_for_discharge,
             )
             vehicle_battery.soc_kwh -= veh_batt_discharge
             remaining_consumption -= veh_batt_discharge
@@ -478,7 +504,7 @@ def run_energy_flow_model(df_all, home_battery, vehicle_battery, grid):
                 "home_batt_soh": home_battery.soh,
                 "veh_batt_soh": vehicle_battery.soh,
                 "driving_discharge": driving_discharge,
-                "unmet_vehicle_consumption": unmet_vehicle_consumption,
+                "public_charge": public_charge,
                 "home_export": home_export,
                 "vehicle_export": vehicle_export,
                 "pv_earnings": pv_export * row.effective_export_price,
@@ -508,6 +534,7 @@ def run_model(st, home_battery, vehicle_battery, grid, kwh_per_km):
         return
 
     df_all = precompute_static_columns(
+        st,
         df_all,
         kwh_per_km,
         grid,
@@ -516,6 +543,7 @@ def run_model(st, home_battery, vehicle_battery, grid, kwh_per_km):
     )
     export_df(st.session_state["export_df_flag"], df_all, "df_all.csv")
     results_df = run_energy_flow_model(
+        st,
         df_all,
         st.session_state["home_battery"],
         st.session_state["vehicle_battery"],
@@ -524,11 +552,12 @@ def run_model(st, home_battery, vehicle_battery, grid, kwh_per_km):
     # export_df(results_df, "results_df1.csv")
 
     results_df["network_variable_cost"] = (
-        results_df["grid_import"] * st.session_state["grid"].network_cost_import_per_kwh
+        -results_df["grid_import"]
+        * st.session_state["grid"].network_cost_import_per_kwh
     )
-    results_df["network_fixed_cost"] = st.session_state["grid"].daily_fee / 24
+    results_df["network_fixed_cost"] = -st.session_state["grid"].daily_fee / 24
     results_df["grid_energy_cost"] = (
-        results_df["grid_import_cost"] - results_df["network_variable_cost"]
+        -results_df["grid_import_cost"] - results_df["network_variable_cost"]
     )
     st.session_state["results_df"] = results_df
 
@@ -632,12 +661,12 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
             totals.loc["curtailment_rate", "Total"] = safe_divide(
                 totals, "curtailment_op_cost", "curtailment"
             )
-            totals.loc["grid_energy_rate", "Total"] = safe_divide(
+            totals.loc["grid_energy_rate", "Total"] = -safe_divide(
                 totals, "grid_energy_cost", "grid_import"
             )
             public_charge_rate = st.session_state["public_charge_rate"]
             totals.loc["public_charge_cost", "Total"] = (
-                totals.loc["unmet_vehicle_consumption", "Total"] * public_charge_rate
+                -totals.loc["public_charge", "Total"] * public_charge_rate
             )
             totals.loc["public_charge_rate", "Total"] = (
                 public_charge_rate * 100
@@ -646,7 +675,7 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
                 # kWh metrics
                 "pv_kwh": ("kWh", 0),
                 "grid_import": ("kWh", 0),
-                "unmet_vehicle_consumption": ("kWh", 0),
+                "public_charge": ("kWh", 0),
                 "consumption_kwh": ("kWh", 0),
                 "vehicle_consumption": ("kWh", 0),
                 "curtailment": ("kWh", 0),
@@ -659,21 +688,24 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
                 "home_earnings": ("$", 1),
                 "veh_earnings": ("$", 1),
                 "pv_earnings": ("$", 1),
+                "network_variable_cost": ("$", 1),
+                "network_fixed_cost": ("$", 1),
+                "grid_energy_cost": ("$", 1),
                 "public_charge_cost": ("$", 1),
+                # "network_variable_cost": ("$", -1), #Previously had these as -1.  Changed to + and altered their definitions above so that they are negative.
+                # "network_fixed_cost": ("$", -1),
+                # "grid_energy_cost": ("$", -1),
+                # "public_charge_cost": ("$", -1),
                 "grid_import_cost": ("$", 0),
                 "curtailment_op_cost": ("$", 0),
-                "network_variable_cost": ("$", -1),
-                "network_fixed_cost": ("$", -1),
-                "grid_energy_cost": ("$", -1),
-                "public_charge_cost": ("$", -1),
                 # c metrics
                 "grid_import_rate": ("c", 0),
                 "home_export_rate": ("c", 0),
                 "veh_export_rate": ("c", 0),
-                "public_charge_rate": ("c", 0),
+                "grid_energy_rate": ("c", 0),
                 "pv_export_rate": ("c", 0),
                 "curtailment_rate": ("c", 0),
-                "grid_energy_rate": ("c", 0),
+                "public_charge_rate": ("c", 0),
             }
             # Use metric_units keys for ordering
             ordered_metrics = list(metric_units.keys())
@@ -691,14 +723,50 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
                 if metrics:
                     sub_totals = totals.loc[metrics].copy()
                     sub_totals.index.name = f"Metric ({unit})"
-                    if unit == "kWh":
-                        formatted = sub_totals.applymap(lambda x: f"{int(round(x)):,}")
-                    elif unit == "$":
-                        formatted = sub_totals.applymap(
-                            lambda x: f"{unit}{int(round(x)):,}"
+
+                    # Determine sign for each metric
+                    signs = [metric_units[m][1] for m in metrics]
+                    contributing = [m for m, s in zip(metrics, signs) if s != 0]
+                    non_contributing = [m for m, s in zip(metrics, signs) if s == 0]
+
+                    if unit == "$":
+                        net_earnings = sum(
+                            totals.loc[m, "Total"] * metric_units[m][1]
+                            for m in contributing
                         )
-                    elif unit == "c":
-                        formatted = sub_totals.applymap(lambda x: f"{x:.2f}c")
+                        # Insert Net Earnings after last contributing metric
+                        ordered_metrics = (
+                            contributing + ["Net Earnings"] + non_contributing
+                        )
+                        # Build a new DataFrame in the correct order
+                        sub_totals = sub_totals.reindex(contributing + non_contributing)
+                        # Insert Net Earnings at the correct position
+                        sub_totals = pd.concat(
+                            [
+                                sub_totals.loc[contributing],
+                                pd.DataFrame(
+                                    {"Total": [net_earnings]}, index=["Net Earnings"]
+                                ),
+                                sub_totals.loc[non_contributing],
+                            ]
+                        )
+
+                    # Formatting function for negatives as (140)
+                    def fmt(x):
+                        if pd.isna(x):
+                            return ""
+                        x = round(x)
+                        if x < 0:
+                            return f"({abs(x):,})"
+                        else:
+                            return f"{x:,}"
+
+                    # Apply formatting and right-align
+                    formatted = sub_totals.applymap(fmt)
+                    formatted = formatted.style.set_properties(
+                        **{"text-align": "right"}
+                    )
+
                     col.subheader(f"{unit} ")
                     col.markdown(
                         formatted.to_html(
@@ -706,20 +774,18 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
                         ),
                         unsafe_allow_html=True,
                     )
-                    # Show total earnings for $ metrics using sign
-                    if unit == "$":
-                        total_earnings = sum(
-                            totals.loc[m, "Total"] * metric_units[m][1]
-                            for m in metrics
-                            if metric_units[m][1] != 0
-                        )
-                        col.write(f"**Net Earnings:** ${int(round(total_earnings)):,}")
+                    # if unit == "$":
+                    # Optionally, bold the Net Earnings row
+                    # col.markdown(
+                    #     f"<div style='text-align:right; font-weight:bold;'>Net Earnings: {fmt(net_earnings)}</div>",
+                    #     unsafe_allow_html=True,
+                    # )
 
             sankey_fig, total_flow, double_counted_sum, net_flow = plot_energy_sankey(
                 totals["Total"]
             )
 
-            source = ["pv_kwh", "grid_import", "unmet_vehicle_consumption"]
+            source = ["pv_kwh", "grid_import", "public_charge"]
             sink = [
                 "consumption_kwh",
                 "vehicle_consumption",
@@ -740,6 +806,9 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
             st.write(f"Net: {net_flow:.2f} kWh")
             st.write(f"Source: {total_source:.2f} kWh")
             st.write(f"Sink: {total_sink:.2f} kWh")
+
+            if st.session_state["export_df_flag"]:
+                st.write(totals)
 
         else:
             # default_names = [

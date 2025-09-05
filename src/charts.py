@@ -75,13 +75,9 @@ def plot_energy_sankey(totals):
         ("PV", "Curtailment", totals.loc["curtailment"]),
         #
         (
-            "Unmet Vehicle Demand",
+            "public_charge",
             "Vehicle Consumption",
-            (
-                totals.loc["unmet_vehicle_consumption"]
-                if "unmet_vehicle_consumption" in totals.index
-                else 0
-            ),
+            (totals.loc["public_charge"] if "public_charge" in totals.index else 0),
         ),
         # Grid flows
         ("Grid", "Consumption", totals.loc["grid_import"]),

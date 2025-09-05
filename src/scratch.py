@@ -142,27 +142,44 @@ results_df = import_df("results_df.csv")
 # test = results_df.merge(df_all, on=["date", "hour"], how="left", suffixes=("", "_y"))
 # Drop all columns from df_all that have the "_y" suffix (i.e., duplicates)
 # test = test[[col for col in test.columns if not col.endswith("_y")]]
-# test1 = test[test["date"] == "2024-11-13"]
-test1 = results_df[results_df["date"] == "2024-11-13"]
-test1 = results_df[
-    (results_df["date"] == "2024-11-13") | (results_df["date"] == "2024-11-13")
+
+sample_date = "2024-07-05"  # "2024-11-13"
+test1 = results_df[results_df["date"] == sample_date]
+# test1 = results_df[
+#     (results_df["date"] == sample_date) | (results_df["date"] == "2024-11-13")
+# ]
+extra_vars = [
+    "veh_batt_charge",
+    "veh_batt_charge_grid",
+    "veh_batt_charge_extra",
+    "veh_batt_discharge",
+    "vehicle_export",
+    "driving_discharge",
 ]
+
 test2 = test1[
     [
+        "date",
         "hour",
+        "consumption_kwh",
+        "pv_export",
+        "pv_to_consumption",
+        "pv_kwh",
         "veh_batt_soc",
+        "target_soc_vehicle",
+        "allow_charge",
+        "effective_import_price",
+        "vehicle_consumption",
+        "public_charge",
         "veh_batt_charge",
-        "veh_batt_charge_grid",
-        "veh_batt_charge_extra",
-        "veh_batt_discharge",
-        "vehicle_export",
-        "driving_discharge",
-        "plugged_in",
-        "price",
+        "public_charge_rate",
+        "no_charging",
+        "effective_export_price",
     ]
 ]
 # test2 = test2[(test2["hour"] > 15) & (test2["hour"] < 20)]
-test2 = test2[(test2["hour"] > 0) & (test2["hour"] < 24)]
+test2 = test2[(test2["hour"] > 5) & (test2["hour"] < 14)]
+
 DIR = r"C:\Energy\V2G\data"
 # test1.to_csv(os.path.join(DIR, "test1.csv"), index=False)
 test2.to_csv(os.path.join(DIR, "test2.csv"), index=False)
@@ -199,4 +216,149 @@ plt.tight_layout()
 plt.show()
 
 
+# %%
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Desired real-space mean and std
+mean_real = 300
+std_real = 100
+
+# Convert to log-space parameters
+variance_real = std_real**2
+mu = np.log(mean_real**2 / np.sqrt(variance_real + mean_real**2))
+sigma = np.sqrt(np.log(1 + variance_real / mean_real**2))
+
+# Generate samples
+samples = np.random.lognormal(mean=mu, sigma=sigma, size=10000)
+
+# Plot histogram
+plt.figure(figsize=(8, 4))
+plt.hist(samples, bins=50, color="skyblue", edgecolor="black", alpha=0.7)
+plt.title("Lognormal Distribution (mean=300, std=50)")
+plt.xlabel("Value")
+plt.ylabel("Frequency")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# Print sample mean and std for verification
+print(f"Sample mean: {samples.mean():.2f}")
+print(f"Sample std: {samples.std():.2f}")
+
+# %%
+# Test target_soc calculations
+import pandas as pd
+import numpy as np
+
+# Load the sample CSV
+df = test2
+
+# Choose window size (e.g., 4 for a small test)
+window = 4
+
+# Fields to inspect
+p_fields = ["vehicle_consumption", "public_charge_rate", "no_charging"]
+n_fields = ["pv_kwh", "effective_export_price", "allow_charge"]
+
+
+# Compute element-wise product
+def win(fields):
+    prod = np.prod([df[f].values for f in fields], axis=0)
+
+    # Pad and create sliding windows
+    pad = np.zeros(window - 1)
+    prod_padded = np.concatenate([prod, pad])
+    windows = np.lib.stride_tricks.sliding_window_view(prod_padded, window)
+
+    # Print sliding windows for review
+    print("Sliding windows of product:")
+    print(windows)
+
+    # Print cumulative sums for each window
+    partial_sums = np.cumsum(windows, axis=1)
+    print("Cumulative sums for each window:")
+    print(partial_sums)
+    return partial_sums
+
+
+p_part = win(p_fields)
+n_part = win(n_fields)
+# win(fields)
+# %%
+
+
+def rolling_partial_dots(df, fields, window):
+    """
+    For each index, returns the cumulative sums of the element-wise product of the given fields
+    over the next 'window' values.
+    Example: fields = ["consumption_kwh", "effective_export_price"]
+    Output: shape (n, window)
+    """
+    arrs = [df[f].values for f in fields]
+    # Element-wise product
+    prod = np.prod(arrs, axis=0)
+    n = len(prod)
+    pad = np.zeros(window - 1)
+    prod_padded = np.concatenate([prod, pad])
+    windows = np.lib.stride_tricks.sliding_window_view(prod_padded, window)
+    partial_sums = np.cumsum(windows, axis=1)
+    return partial_sums  # shape: (n, window)
+
+
+# %%
+fields = n_fields
+window = 6
+n_sum = rolling_partial_dots(df, fields, window)
+n_sum
+weighted_arrays = []
+weighted_arrays.append(p_sum)
+n_sum = -n_sum
+weighted_arrays.append(n_sum)
+diff = np.sum(weighted_arrays, axis=0)
+idx_max = np.argmax(diff, axis=1)
+# %%
+
+
+metric_units = {
+    # kWh metrics
+    "pv_kwh": ("kWh", 0),
+    "grid_import": ("kWh", 0),
+    "public_charge": ("kWh", 0),
+    "consumption_kwh": ("kWh", 0),
+    "vehicle_consumption": ("kWh", 0),
+    "curtailment": ("kWh", 0),
+    "vehicle_export": ("kWh", 0),
+    "home_export": ("kWh", 0),
+    "pv_export": ("kWh", 0),
+    "home_batt_loss": ("kWh", 0),
+    "veh_batt_loss": ("kWh", 0),
+    # $ metrics
+    "home_earnings": ("$", 1),
+    "veh_earnings": ("$", 1),
+    "pv_earnings": ("$", 1),
+    "network_variable_cost": ("$", -1),
+    "network_fixed_cost": ("$", -1),
+    "grid_energy_cost": ("$", -1),
+    "public_charge_cost": ("$", -1),
+    "grid_import_cost": ("$", 0),
+    "curtailment_op_cost": ("$", 0),
+    # c metrics
+    "grid_import_rate": ("c", 0),
+    "home_export_rate": ("c", 0),
+    "veh_export_rate": ("c", 0),
+    "public_charge_rate": ("c", 0),
+    "pv_export_rate": ("c", 0),
+    "curtailment_rate": ("c", 0),
+    "grid_energy_rate": ("c", 0),
+}
+# %%
+ordered_metrics = list(metric_units.keys())
+totals = import_df("totals.csv")
+tables = {"kWh": [], "$": [], "c": []}
+for metric in ordered_metrics:
+    unit, _ = metric_units[metric]
+    if metric in totals.index:
+        tables[unit].append(metric)
 # %%

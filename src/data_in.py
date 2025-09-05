@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import random
 import os
@@ -218,6 +219,7 @@ def plot_volatility_timeseries(
     fig, ax = plt.subplots(figsize=(10, 4))
     for col in value_cols:
         ax.plot(timestamps, df_plot[col], label=col)
+        # ax.bar(timestamps, df_plot[col], label=col, alpha=0.7)
 
     if chart_type == "weekly":
         days = pd.to_datetime(plot_dates)
@@ -236,6 +238,42 @@ def plot_volatility_timeseries(
     ax.grid(True)
     plt.tight_layout()
     st.pyplot(fig)
+    cols = ["date", "hour"] + value_cols
+    st.write(df_plot[cols])
+
+    # fig, ax = plt.subplots(figsize=(10, 4))
+    # bar_width = 0.8 / len(value_cols)  # Adjust bar width for number of series
+    # x = np.arange(len(timestamps))
+
+    # for i, col in enumerate(value_cols):
+    #     ax.bar(
+    #         x + i * bar_width,
+    #         df_plot[col].values,
+    #         width=bar_width,
+    #         label=col,
+    #         alpha=0.7,
+    #     )
+
+    # ax.set_xticks(x + bar_width * (len(value_cols) - 1) / 2)
+    # ax.set_xticklabels(
+    #     [
+    #         t.strftime("%a") if chart_type == "weekly" else t.strftime("%H:%M")
+    #         for t in timestamps
+    #     ]
+    # )
+
+    # if chart_type == "weekly":
+    #     ax.set_title(f"{season} week starting {week_start}")
+    #     ax.set_xlabel("Day of Week")
+    # else:
+    #     ax.set_title(f"{season} day {week_start}")
+    #     ax.set_xlabel("Hour of Day")
+
+    # ax.set_ylabel("Value")
+    # ax.legend()
+    # ax.grid(True)
+    # plt.tight_layout()
+    # st.pyplot(fig)
 
 
 def export_df(export_flag, df, filename):

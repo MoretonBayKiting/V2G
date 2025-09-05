@@ -33,6 +33,7 @@ from synthetic import (
 )
 
 from model import run_model, plot_res, export_df, combine_all_data, Battery, Grid
+from run import open_model
 
 # from scenario import load_scenario, get_generator_param, get_system_param, get_data_path
 
@@ -96,7 +97,7 @@ st.markdown(
 )
 # ...existing code...
 # Initialise with default scenario into session state
-def_scen = "temp.json"
+def_scen = "drive1.json"
 def_price = "priceVic.csv"
 if "scenario" not in st.session_state:
     scenario = initialize_from_scenario(
@@ -113,6 +114,7 @@ if "scenario" not in st.session_state:
         used_battery_args,
     )
     st.session_state["model_dirty"] = True
+
 else:
     scenario = st.session_state["scenario"]
 
@@ -126,7 +128,7 @@ scenario_json_path = st.sidebar.text_input(
 #     "Download scenario as...", value="scenario_saved.json"
 # )
 # download_filename = get_input_path("???.csv").replace("\\", "/")
-download_filename = "???.csv"
+download_filename = "???.json"
 # Autoload scenario when text input changes
 if st.session_state.get("scenario_json_path") != scenario_json_path:
     st.session_state["scenario_json_path"] = scenario_json_path
@@ -585,7 +587,6 @@ elif main_page_option == "project model":
             # Ensure selectbox reflects the updated index
             selected_date = available_dates[st.session_state["selected_date_idx"]]
             st.session_state["selected_date_idx"] = available_dates.index(selected_date)
-    # ...existing code...
 
-    plot_res(st, results_df, chart_type, period, selected_date)
+    plot_res(st, st.session_state["results_df"], chart_type, period, selected_date)
 # st.write("Current scenario (not editable):", st.session_state["scenario"])

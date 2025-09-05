@@ -33,7 +33,6 @@ from synthetic import (
 )
 
 from model import run_model, plot_res, export_df, combine_all_data, Battery, Grid
-from run import open_model
 
 # from scenario import load_scenario, get_generator_param, get_system_param, get_data_path
 

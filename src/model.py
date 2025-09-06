@@ -99,7 +99,9 @@ def vectorized_export_opportunity(
     """
     prices = df[price_col].values
     n = len(prices)
-    pad = np.zeros(lookahead_hours - 1)
+    lookahead_hours = int(lookahead_hours)
+    top_n = int(top_n)
+    pad = np.zeros(int(lookahead_hours) - 1)
     prices_padded = np.concatenate([prices, pad])
     windows = np.lib.stride_tricks.sliding_window_view(prices_padded, lookahead_hours)
     export_mask = np.zeros(n, dtype=bool)
@@ -137,6 +139,7 @@ def rolling_partial_dots(df, fields, window):
     Example: fields = ["consumption_kwh", "effective_export_price"]
     Output: shape (n, window)
     """
+    window = int(window)
     arrs = [df[f].values for f in fields]
     # Element-wise product
     prod = np.prod(arrs, axis=0)
@@ -153,6 +156,7 @@ def target_soc(
     weighted_components,  # e.g. [("p", ["consumption_kwh", "effective_import_price"]), ("n", ["pv_kwh", "effective_import_price"]), ...]
     components,  # e.g. [("p", ["consumption_kwh"]), ("n", ["pv_kwh"])]
     lookahead_hours=24,
+    debug_date=None,
 ):
     """
     For each time step, computes the required SoC over the lookahead window,
@@ -163,16 +167,27 @@ def target_soc(
     The energy required is that which can be supplied in that period - use idx_max to find that energy from the unweighted partial sum.
     Returns: target_soc (np.ndarray, shape [n])
     """
-    n = len(df_all)
 
+    if debug_date is None or debug_date == "None":
+        df = df_all
+    else:
+        df = df_all[df_all["date"].astype(str) == debug_date]
+        print(f"weighted_components:  {weighted_components}")
+        print(f"components:  {components}")
+    n = len(df)
+    print(f"n (length of dataframe in target_soc): {n}")
+    print(f"lookahead_hours : {lookahead_hours}")
     # Compute weighted partial sums
     if weighted_components is not None:
         weighted_arrays = []
         for sign, fields in weighted_components:
-            arr = rolling_partial_dots(df_all, fields, lookahead_hours)
+            arr = rolling_partial_dots(df, fields, lookahead_hours)
+            # print(f"fields: {fields}")
+            # print(f"arr: {arr}")
             if sign == "n":
                 arr = -arr
             weighted_arrays.append(arr)
+            # print(f"weighted_arrays: {weighted_arrays}")
         # Sum all weighted arrays to get the diff
         diff = np.sum(weighted_arrays, axis=0)  # shape (n, lookahead_hours)
         idx_max = np.argmax(diff, axis=1)  # shape (n,)
@@ -180,17 +195,23 @@ def target_soc(
     # Compute unweighted partial sums
     unweighted_arrays = []
     for sign, fields in components:
-        arr = rolling_partial_dots(df_all, fields, lookahead_hours)
+        arr = rolling_partial_dots(df, fields, lookahead_hours)
+        # print(f"fields: {fields}")
+        # print(f"arr: {arr}")
         if sign == "n":
             arr = -arr
         unweighted_arrays.append(arr)
+        # print(f"umweighted_arrays: {unweighted_arrays}")
     temp = np.sum(unweighted_arrays, axis=0)  # shape (n, lookahead_hours)
     if weighted_components is None:
         idx_max = np.argmax(temp, axis=1)  # shape (n,)
     # For each time step, select value at idx_max
     # target_soc = temp[np.arange(n), idx_max]
     target_soc = np.maximum(temp[np.arange(n), idx_max], 0)
-    return target_soc, idx_max
+    if debug_date is None or debug_date == "None":
+        return target_soc, None, None, None
+    else:
+        return target_soc, idx_max, weighted_arrays, unweighted_arrays
 
 
 def precompute_static_columns(
@@ -203,6 +224,7 @@ def precompute_static_columns(
 ):
     start = time.time()
     df_all = df_all.fillna(0)
+    df_all = df_all.sort_values(["date", "hour"]).reset_index(drop=True)
     df_all["price_kwh"] = df_all["price"] / 1000
     df_all["effective_import_price"] = (
         df_all["price_kwh"] + grid.network_cost_import_per_kwh
@@ -242,7 +264,9 @@ def precompute_static_columns(
     # df_all["export_price_sign"] = (df_all["effective_export_price"] > 0).astype(int)
     df_all["positive_export_price"] = np.maximum(df_all["effective_export_price"], 0)
 
-    target_soc_vehicle, idx_max_veh = target_soc(
+    if st.session_state.get("debug_date") is not None:
+        print(f"debug date: {st.session_state["debug_date"]}")
+    target_soc_vehicle, idx_max_veh, weighted_arrays, unweighted_arrays = target_soc(
         df_all,
         [
             # ("p", ["vehicle_consumption", "public_charge_rate", "no_charging"]),
@@ -250,25 +274,39 @@ def precompute_static_columns(
             ("n", ["pv_kwh", "effective_export_price", "allow_charge"]),
         ],
         [
-            # ("p", ["vehicle_consumption", "no_charging"]),
-            ("p", ["vehicle_consumption"]),
+            ("p", ["vehicle_consumption", "no_charging"]),
+            # ("p", ["vehicle_consumption"]),
             ("n", ["pv_kwh", "positive_export_price", "allow_charge"]),
         ],
-        lookahead_hours=24,
+        lookahead_hours=vehicle_battery.target_soc_lookahead_hours,
+        debug_date=st.session_state.get("debug_date"),
     )
     target_soc_vehicle = np.clip(target_soc_vehicle, 0, vehicle_battery.capacity_kwh)
-
-    target_soc_home, idx_max_home = target_soc(
+    if (
+        st.session_state.get("debug_date") is None
+        or st.session_state.get("debug_date") == "None"
+    ):
+        print(f"debug_date is either null or None")
+    else:
+        print(f"weighted_arrays:  {weighted_arrays}")
+        print(f"unweighted_arrays:  {unweighted_arrays}")
+        print(f"idx_max:  {idx_max_veh}")
+        print(f"target_soc_vehicle:  {target_soc_vehicle}")
+    target_soc_home, idx_max_home, weighted_arrays, unweighted_arrays = target_soc(
         df_all,
         [
             ("p", ["consumption_kwh", "effective_import_price"]),
             ("n", ["pv_kwh", "effective_export_price"]),
         ],
         [("p", ["consumption_kwh"]), ("n", ["pv_kwh"])],
-        lookahead_hours=24,
+        lookahead_hours=home_battery.target_soc_lookahead_hours,
+        debug_date=st.session_state.get("debug_date"),
     )
     target_soc_home = np.clip(target_soc_home, 0, home_battery.capacity_kwh)
-
+    # if weighted_arrays is not None:
+    #     st.write(weighted_arrays)
+    # if unweighted_arrays is not None:
+    #     st.write(unweighted_arrays)
     df_all["target_soc_vehicle"] = target_soc_vehicle
     df_all["target_soc_home"] = target_soc_home
     df_all["idx_max_home"] = idx_max_home

@@ -132,7 +132,7 @@ windows_supply = np.lib.stride_tricks.sliding_window_view(
 
 sum_load = np.sum(windows_load, axis=1)
 supply_rest = np.sum(windows_supply[:, 1:], axis=1)
-target_soc = np.maximum(windows_load[:, 0], sum_load - supply_rest)
+targ_soc = np.maximum(windows_load[:, 0], sum_load - supply_rest)
 # %%import numpy as np
 import matplotlib.pyplot as plt
 
@@ -219,16 +219,10 @@ df = test2
 
 
 # %%
-
-# Test target_soc calculations
-import pandas as pd
-import numpy as np
-from model import rolling_partial_dots
-
 # Load the sample CSV
 df = test2
 #  As above but use rolling_partial_dots() (from model)
-window = 24
+window = 12
 # rng = [5:12]
 p_fields = ["vehicle_consumption", "public_charge_rate"]
 n_fields = ["pv_kwh", "effective_export_price", "allow_charge"]
@@ -236,24 +230,23 @@ p_sum = rolling_partial_dots(df, p_fields, window)
 n_sum = rolling_partial_dots(df, n_fields, window)
 weighted_arrays = []
 weighted_arrays.append(p_sum)
-n_sum = -n_sum
-weighted_arrays.append(n_sum)
+weighted_arrays.append(-n_sum)
 diff = np.sum(weighted_arrays, axis=0)
 idx_max = np.argmax(diff, axis=1)
+
 p_fields2 = ["vehicle_consumption", "no_charging"]
 n_fields2 = ["pv_kwh", "positive_export_price", "allow_charge"]
 p_sum = rolling_partial_dots(df, p_fields2, window)
 n_sum = rolling_partial_dots(df, n_fields2, window)
 unweighted_arrays = []
 unweighted_arrays.append(p_sum)
-# n_sum = -n_sum
 unweighted_arrays.append(-n_sum)
 temp = np.sum(unweighted_arrays, axis=0)
 np.maximum(temp[np.arange(len(df)), idx_max], 0)
-print(idx_max)
-target_soc = np.maximum(temp[np.arange(len(df)), idx_max], 0)
-# target_soc = temp[np.arange(len(df)), idx_max]
-id = 6
+targ_soc = np.maximum(temp[np.arange(len(df)), idx_max], 0)
+# targ_soc = temp[np.arange(len(df)), idx_max]
+
+id = 7
 print(f"Weighted arrays and diff")
 print(weighted_arrays[0][id, :])
 print(weighted_arrays[1][id, :])
@@ -262,11 +255,38 @@ print(f"Unweighted arrays  and temp (diff)")
 print(unweighted_arrays[0][id, :])
 print(unweighted_arrays[1][id, :])
 print(temp[id])
-print(f"idx_max and target_soc")
+print(f"idx_max and targ_soc")
 print(idx_max)
-print(target_soc)
-# %%
+print(targ_soc)
+print(f"idx_max[]{id}]:  {idx_max[id]}")
+# for i in np.arange(5):
+#     print(f"targ_soc[]{id+i}]:  {targ_soc[id+i]}")
+i = 6
+print(f"targ_soc: {id} to {id+i} : {targ_soc[id:id+i]}")
 
+# %%
+# Test target_soc calculations
+import pandas as pd
+import numpy as np
+from model import rolling_partial_dots, target_soc
+
+df_all = import_df("df_all.csv")
+lookahead_hours = 5
+debug_date = "2024-12-05"
+target_soc_vehicle, idx_max_veh, weighted_arrays, unweighted_arrays = target_soc(
+    df_all,
+    [
+        ("p", ["vehicle_consumption", "public_charge_rate"]),
+        ("n", ["pv_kwh", "effective_export_price", "allow_charge"]),
+    ],
+    [
+        ("p", ["vehicle_consumption", "no_charging"]),
+        ("n", ["pv_kwh", "positive_export_price", "allow_charge"]),
+    ],
+    lookahead_hours=lookahead_hours,
+    debug_date=debug_date,
+)
+# %%
 
 metric_units = {
     # kWh metrics

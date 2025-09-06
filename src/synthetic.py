@@ -115,7 +115,7 @@ def generate_synthetic_driving(
                     trip_distance = np.clip(
                         np.random.lognormal(
                             np.log(trip_set.get("distance_mean", 30)),
-                            trip_set.get("distance_logstd", 0.4),
+                            trip_set.get("distance_std", 0.4),
                         ),
                         2,
                         300,
@@ -123,7 +123,7 @@ def generate_synthetic_driving(
                     trip_period = np.clip(
                         np.random.lognormal(
                             np.log(trip_set.get("length_mean", 2)),
-                            trip_set.get("length_logstd", 0.5),
+                            trip_set.get("length_std", 0.5),
                         ),
                         0.5,
                         48,

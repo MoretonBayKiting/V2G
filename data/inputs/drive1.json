@@ -5,26 +5,26 @@
       "seed": 42,
       "trips": [
         {
-          "probability": 0.4,
+          "probability": 0.8,
           "weekday": true,
           "weekend": true,
           "distance_mean": 20.0,
-          "distance_std": 0.0,
+          "distance_std": 6.0,
           "time_mean": 8.0,
-          "time_std": 0.0,
+          "time_std": 0.2,
           "length_mean": 2.0,
-          "length_std": 0.0
+          "length_std": 2.0
         },
         {
-          "probability": 0.0,
+          "probability": 0.03,
           "weekday": true,
           "weekend": false,
           "distance_mean": 400.0,
-          "distance_std": 20.0,
+          "distance_std": 0.0,
           "time_mean": 8.0,
           "time_std": 0.0,
           "length_mean": 45.0,
-          "length_std": 5.0
+          "length_std": 0.0
         }
       ]
     },
@@ -55,16 +55,16 @@
       "max_charge_kw": 5.0,
       "max_discharge_kw": 5.0,
       "cycle_eff_pct": 90.0,
-      "target_soc_lookahead_hours": 72.0,
-      "export_lookahead_hours": 24.0,
-      "export_good_price_periods": 6.0
+      "target_soc_lookahead_hours": 5,
+      "export_lookahead_hours": 24,
+      "export_good_price_periods": 6
     },
     "vehicle_battery": {
       "capacity_kwh": 60,
       "max_charge_kw": 7.0,
       "max_discharge_kw": 7.0,
       "cycle_eff_pct": 90,
-      "target_soc_lookahead_hours": 72,
+      "target_soc_lookahead_hours": 5,
       "export_lookahead_hours": 24,
       "export_good_price_periods": 6
     },

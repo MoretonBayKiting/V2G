@@ -77,6 +77,9 @@ used_battery_args = [
     "max_charge_kw",
     "max_discharge_kw",
     "cycle_eff_pct",
+    "target_soc_lookahead_hours",
+    "export_lookahead_hours",
+    "export_good_price_periods",
 ]
 # st.set_page_config(layout="wide") ## This to fill the width
 # Add this near the top of your app.py  # Should control width using max_width: 1200px;  But that parameter seems not very effective.
@@ -367,9 +370,11 @@ if main_page_option == "edit parameters":
                     "start_date",
                     "public_charge_rate",
                     "export_df_flag",
+                    # "debug_date",  #
                 ]:
                     if k in params:
                         st.session_state[k] = params[k]
+                        print(f"Global parameter {k}: {st.session_state[k]}")
                 # st.checkbox["export_df_flag"] = params["export_df_flag"]
 
     # --- For debugging: show current scenario dict ---

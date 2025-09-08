@@ -181,39 +181,14 @@ def generate_synthetic_driving(
     print(f"df_padded.shape: {df_padded.shape}")
     df_padded["season"] = df_padded["date"].apply(get_season)
     df_padded = df_padded.sort_values(["date", "hour"]).reset_index(drop=True)
+    print(
+        f"[DEBUG] df_padded shape: {df_padded.shape}, columns: {list(df_padded.columns)}"
+    )
+    print(
+        f"[DEBUG] df_synth shape: {df_synth.shape}, columns: {list(df_synth.columns)}"
+    )
+
     return df_padded, df_synth
-
-
-# def filter_overlapping_trips(df_synth, n_days=365, start_date="2024-07-01"):
-#     """Remove overlapping trips from df_synth, keeping the longest trip in case of overlap."""
-#     df = df_synth.copy()
-#     # Add a unique index for reference
-#     df["trip_idx"] = df.index
-#     # Calculate absolute start and end hour for each trip
-#     base_time = pd.Timestamp(start_date)
-#     df["start_dt"] = pd.to_datetime(df["date"]) + pd.to_timedelta(df["hour"], unit="h")
-#     df["start_hour_abs"] = (
-#         (df["start_dt"] - base_time).dt.total_seconds() // 3600
-#     ).astype(int)
-#     df["end_hour_abs"] = (df["start_hour_abs"] + df["trip_period_hr"]).astype(int)
-
-#     # Sort by start time, then by distance_km descending (prefer longer trips)
-#     df = df.sort_values(
-#         ["start_hour_abs", "distance_km"], ascending=[True, False]
-#     ).reset_index(drop=True)
-
-#     claimed_hours = set()
-#     keep_idxs = []
-#     for _, row in df.iterrows():
-#         trip_hours = set(range(int(row["start_hour_abs"]), int(row["end_hour_abs"])))
-#         if claimed_hours.isdisjoint(trip_hours):
-#             keep_idxs.append(row["trip_idx"])
-#             claimed_hours.update(trip_hours)
-#         # else: skip this trip (it overlaps with a previous one)
-
-#     # Return only non-overlapping trips
-#     filtered = df_synth.loc[keep_idxs].reset_index(drop=True)
-#     return filtered
 
 
 #  --- Function to expand trips over multiple hours ---

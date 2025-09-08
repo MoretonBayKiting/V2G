@@ -1,5 +1,5 @@
 {
-  "generator_params": {
+  "synthetic_data_params": {
     "driving": {
       "n_days": 365,
       "seed": 42,

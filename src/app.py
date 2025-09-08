@@ -100,7 +100,7 @@ st.markdown(
 # ...existing code...
 # Initialise with default scenario into session state
 def_scen = "2Drives.json"
-def_price = "priceVic.csv"
+def_price = "Vic.csv"
 if "scenario" not in st.session_state:
     scenario = initialize_from_scenario(
         st,
@@ -122,60 +122,38 @@ else:
 
 
 # --- Sidebar controls ---
-st.sidebar.header("Scenario Management")
-
-scenario_base = st.sidebar.selectbox(
-    "Choose a stored scenario 👇",
-    ["2Drives", "drive1", "scen20250831"],
-    key="scenario_selectbox",
-)
-scenario_json_path = get_input_path(scenario_base + ".json")
-
-# Add download button for Scenario
-# download_filename = get_input_path("???.csv").replace("\\", "/")
-download_filename = "???.json"
-scenario = st.session_state.get("scenario")
-if scenario is not None:
-    scenario_json = json.dumps(scenario, indent=2)
-    st.sidebar.download_button(
-        label="Download Scenario",
-        data=scenario_json,
-        file_name=download_filename,
-        mime="application/json",
-    )
-
-
-# download_filename = st.sidebar.text_input(
-#     "Download scenario as...", value="scenario_saved.json"
-# )
 
 # Autoload scenario when text input changes
-if st.session_state.get("scenario_json_path") != scenario_json_path:
+if "scenario" not in st.session_state:
+    scenario_json_path = get_input_path(def_scen + ".json")
+    price_path = get_input_path(def_price + ".csv")
+    scenario = initialize_from_scenario(
+        st,
+        scenario_json_path,
+        price_path,
+        export_df,
+        autocast_params,
+        generate_synthetic_driving,
+        generate_synthetic_pv,
+        generate_synthetic_consumption,
+        Battery,
+        Grid,
+        used_battery_args,
+    )
+    # st.success("Scenario loaded and parameters applied.")
+    st.session_state["model_dirty"] = True
+    st.session_state["scenario"] = scenario
     st.session_state["scenario_json_path"] = scenario_json_path
-    try:
-        scenario = initialize_from_scenario(
-            st,
-            scenario_json_path,
-            get_input_path(def_price),
-            export_df,
-            autocast_params,
-            generate_synthetic_driving,
-            generate_synthetic_pv,
-            generate_synthetic_consumption,
-            Battery,
-            Grid,
-            used_battery_args,
-        )
-        # st.success("Scenario loaded and parameters applied.")
-        st.session_state["model_dirty"] = True
-    except Exception as e:
-        st.error(f"Failed to load scenario: {e}")
+    st.session_state["model_dirty"] = True
 
+if "mode" not in st.session_state:
+    st.session_state["mode"] = "edit"
+mode = st.session_state["mode"]
 # Add sidebar options for main page control
 edit_mode = st.sidebar.button("Edit parameters", key="edit_btn")
 if edit_mode:
     st.session_state["mode"] = "edit"
-price_mode = st.sidebar.button("Show price summaries", key="price_btn")
+price_mode = st.sidebar.button("Select price series", key="price_btn")
 if price_mode:
     st.session_state["mode"] = "price"
 project_mode = st.sidebar.button("Project model", key="project_btn")
@@ -189,21 +167,89 @@ if "mode" not in st.session_state:
 mode = st.session_state["mode"]
 
 if mode == "price":
+    price_options = ["Vic", "Qld"]
+    # Get the current base name from session state, default to first option
+    current_price_path = st.session_state.get("price_path", get_input_path("Vic.csv"))
+    current_price_base = os.path.splitext(os.path.basename(current_price_path))[0]
     price_base = st.sidebar.selectbox(
         "Choose a stored price history file 👇",
-        ["Vic", "Qld"],
+        price_options,
+        index=(
+            price_options.index(current_price_base)
+            if current_price_base in price_options
+            else 0
+        ),
         key="price_selectbox",
     )
     price_path = get_input_path(price_base + ".csv")
+    st.session_state["price_path"] = price_path
+
+# ...existing code...
+if mode == "price" or mode == "edit" or mode == "project":
+    # Always check if price_path has changed
+    last_price_path = st.session_state.get("last_price_path")
+    if st.session_state.get("price_path") != last_price_path:
+        st.session_state["model_dirty"] = True
+        st.session_state["last_price_path"] = st.session_state.get("price_path")
+# ...existing code...
 
 if mode == "edit":
+    scenario_base = st.sidebar.selectbox(
+        "Choose a stored scenario 👇",
+        ["2Drives", "drive1", "scen20250831"],
+        key="scenario_selectbox",
+    )
+    scenario_json_path = get_input_path(scenario_base + ".json")
+    # Use the current price_path if available
+    price_path = st.session_state.get("price_path", get_input_path(def_price + ".csv"))
+    # Add download button for Scenario
+    # download_filename = get_input_path("???.csv").replace("\\", "/")
+    download_filename = scenario_base + ".json"
+    scenario = st.session_state.get("scenario")
+    if scenario is not None:
+        scenario_json = json.dumps(scenario, indent=2)
+        st.sidebar.download_button(
+            label="Download Scenario",
+            data=scenario_json,
+            file_name=download_filename,
+            mime="application/json",
+        )
+        # Scenario initialization if selection changes
+    if st.session_state.get("scenario_json_path") != scenario_json_path:
+        st.session_state["scenario_json_path"] = scenario_json_path
+        try:
+            scenario = initialize_from_scenario(
+                st,
+                scenario_json_path,
+                price_path,
+                export_df,
+                autocast_params,
+                generate_synthetic_driving,
+                generate_synthetic_pv,
+                generate_synthetic_consumption,
+                Battery,
+                Grid,
+                used_battery_args,
+            )
+            st.session_state["scenario"] = scenario
+            st.session_state["model_dirty"] = True
+        except Exception as e:
+            st.error(f"Failed to load scenario: {e}")
+
     group = st.sidebar.selectbox("Parameter group", list(scenario.keys()))
     subgroups = list(scenario[group].keys())
     subgroup = st.sidebar.selectbox("Subgroup", subgroups)
+    st.sidebar.header("Scenario Management")
 else:
     group = None
     subgroup = None
 
+
+show_doc = st.sidebar.checkbox("Show User Guide", value=False)
+if show_doc:
+    with open("UG.md", "r", encoding="utf-8") as f:
+        doc_text = f.read()
+    st.markdown(doc_text)
 
 show_doc = st.sidebar.checkbox("Show Documentation", value=False)
 if show_doc:
@@ -211,13 +257,12 @@ if show_doc:
         doc_text = f.read()
     st.markdown(doc_text)
 
+
 # Use the selected price_path from the sidebar
 if mode == "price":
-    # Show price summaries
+    # Select price series
     df_price = st.session_state.get("df_price")
-    if price_path and (
-        df_price is None or price_path != st.session_state.get("price_file")
-    ):
+    if price_path:
         df_price = get_price_data(st, price_path)
         st.session_state["df_price"] = df_price
         st.session_state["price_file"] = price_path
@@ -239,7 +284,7 @@ elif mode == "edit":
 
     st.write(f"Editing parameters for: {group} → {subgroup}")
     # In main page, when editing driving parameters
-    if group == "generator_params" and subgroup == "driving":
+    if group == "synthetic_data_params" and subgroup == "driving":
         trips = params.get("trips", [])
         # ... input widgets for trip parameters ...
         # ... update/add/delete/save buttons ...
@@ -247,10 +292,25 @@ elif mode == "edit":
         # for i, trip in enumerate(trips):
         #     st.write(f"Trip {i}: {trip}")
         trip_index = st.number_input(
-            "Trip Index (base 0)", min_value=0, max_value=max(0, len(trips)), value=0
+            "Trip Index (base 0).  Choose or specify up to 4 (indexed from 0 to 3)",
+            min_value=0,
+            max_value=max(0, len(trips)),
+            value=0,
+        )
+        st.markdown(
+            """
+        **Trip Parameters:**  
+        - *probability*: Probability this trip occurs on a given day  
+        - *weekday/weekend*: Whether trip can occur on those days  
+        - *distance_mean/std*: Mean and standard deviation of trip distance (km)  
+        - *time_mean/std*: Mean and std dev of departure time (hour of day)  
+        - *length_mean/std*: Mean and std dev of trip duration (hours)
+        """
         )
 
-        driving = st.session_state["scenario"]["generator_params"].get("driving", {})
+        driving = st.session_state["scenario"]["synthetic_data_params"].get(
+            "driving", {}
+        )
         if "trips" not in driving:
             driving["trips"] = []
 
@@ -318,7 +378,9 @@ elif mode == "edit":
                     trips.append(new_trip)
                     st.success(f"Trip {len(trips)-1} added.")
                 driving["trips"] = trips
-                st.session_state["scenario"]["generator_params"]["driving"] = driving
+                st.session_state["scenario"]["synthetic_data_params"][
+                    "driving"
+                ] = driving
 
         with cols_1[1]:
             # Delete trip set
@@ -327,7 +389,7 @@ elif mode == "edit":
                     trips.pop(trip_index)
                     st.success(f"Trip {trip_index} deleted.")
                     driving["trips"] = trips
-                    st.session_state["scenario"]["generator_params"][
+                    st.session_state["scenario"]["synthetic_data_params"][
                         "driving"
                     ] = driving
                 else:
@@ -340,6 +402,33 @@ elif mode == "edit":
         #     st.success("Scenario saved to V2g_scen1.json")
 
     else:
+        if group == "synthetic_data_params" and subgroup == "pv":
+            st.markdown(
+                """
+            **PV Generation Parameters:**  
+            - *capacity_kw*: Installed PV system size (kW)  
+            - *sunny_prob*: Probability a day is sunny  
+            - *summer_gen_factor*: Daily kWh per kW in summer  
+            - *winter_gen_factor*: Daily kWh per kW in winter  
+            - *cloudy_mean_frac/std_frac*: Mean and std dev of output fraction on cloudy days  
+            - *n_days*: Number of days to simulate  
+            - *seed*: Random seed for reproducibility
+            """
+            )
+        if group == "synthetic_data_params" and subgroup == "consumption":
+            st.markdown(
+                """
+            **Consumption Parameters:**  
+            - *base_avg*: Average base hourly consumption (kWh)  
+            - *base_std*: Std dev of base hourly consumption  
+            - *morning_peak_kwh*: Extra kWh used in morning peak  
+            - *morning_peak_std*: Std dev of morning peak  
+            - *evening_peak_kwh*: Extra kWh used in evening peak  
+            - *evening_peak_std*: Std dev of evening peak  
+            - *n_days*: Number of days to simulate  
+            - *seed*: Random seed for reproducibility
+            """
+            )
         # Distribute parameter inputs in rows of up to 4 columns
         param_items = list(params.items())
         n_params = len(param_items)
@@ -359,7 +448,7 @@ elif mode == "edit":
         update_params(group, subgroup, edited_params)
         # Generate and store the relevant DataFrame
         st.session_state["model_dirty"] = True
-        if group == "generator_params":
+        if group == "synthetic_data_params":
             params = scenario[group][subgroup]
 
             if subgroup == "driving":
@@ -428,7 +517,7 @@ elif mode == "edit":
     # st.write("Current scenario:", scenario)
 
     df = None
-    if group == "generator_params":
+    if group == "synthetic_data_params":
         if subgroup == "driving" and "df_padded" in st.session_state:
             df = st.session_state["df_padded"]
             df_drive_base = st.session_state["df_drive_base"]
@@ -545,19 +634,22 @@ elif mode == "project":
     if st.session_state["chart_type_select"] == "summary table":
         period_options = ["totals", "daily_averages"]
         period_box_name = "Totals or averages"
+        help_text = "Choose either annual totals or daily averages"
     elif st.session_state["chart_type_select"] in ["weekly", "single day"]:
         period_options = ["Any", "Summer", "Autumn", "Winter", "Spring"]
         period_box_name = "Season"
+        help_text = "Choose a season or Any. Use Any for freedom to choose dates."
     else:
         period_options = ["mthly", "season"]
         period_box_name = "Monthly or by season"
+        help_text = "Who knew help text was required here?"
     with col2:
         period = st.selectbox(
             period_box_name,
             period_options,
             index=0,
             key="period_select",
-            help="Choose aggregation period for sum/avg",
+            help=help_text,
         )
     with col3:
         if chart_type in ["single day", "weekly"]:
@@ -566,7 +658,7 @@ elif mode == "project":
             if "selected_date_idx" not in st.session_state:
                 st.session_state["selected_date_idx"] = 0
             selected_date = st.selectbox(
-                "Select date for single day chart",
+                "Select date for single day or week (weekly will start on nearest Sunday)",
                 available_dates,
                 index=st.session_state["selected_date_idx"],
                 key="single_day_date_select",
@@ -580,8 +672,10 @@ elif mode == "project":
         if chart_type in ["single day", "weekly"]:
             if chart_type == "weekly":
                 inc = 7
-            prev_clicked = st.button("Previous", key="prev_btn")
-            next_clicked = st.button("Next", key="next_btn")
+            prev_clicked = st.button(
+                "Previous", key="prev_btn", help="move to previous day"
+            )
+            next_clicked = st.button("Next", key="next_btn", help="move to next day")
             # Only update index if button was clicked
             if prev_clicked and st.session_state["selected_date_idx"] > inc - 1:
                 st.session_state["selected_date_idx"] -= inc

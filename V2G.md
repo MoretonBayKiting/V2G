@@ -1,17 +1,8 @@
-# V2G - Electricity Analysis
+# V2G - Household electricity flow model
 
-This project analyzes electricity data to explore V2G (Vehicle-to-Grid), home battery, and PV (solar) possibilities.
+This application models household electricity flows primarily to explore V2G (Vehicle-to-Grid), home battery, and PV (solar) possibilities.
 
-## Folder Structure
-
-- `data/`: Contains raw and processed data.
-  - `inputs/`: Input data files (price, PV, consumption, driving).
-  - `processed/`: Processed data files.
-- `notebooks/`: Jupyter notebooks for exploratory analysis.
-- `src/`: Python scripts for data processing, visualization, and analysis.
-- `tests/`: Unit tests for the Python scripts.
-
-## Getting Started - runing locally (not for cloud users)
+## Getting Started - runing locally (not for cloud users). Use the cloud version in the short term.
 
 1. **Install dependencies:**
 
@@ -33,7 +24,7 @@ This project analyzes electricity data to explore V2G (Vehicle-to-Grid), home ba
 Go to https://r9gkgczox3bz22zvp6wufb.streamlit.app/
 You'll need some input files - particularly pricing. Some defaults will load. Use those initially
 
-## Parameters:
+## Parameters: - Look at the User Guide for this - this section not updated to current UI
 
 - **home_battery / vehicle_battery:**
 
@@ -61,7 +52,7 @@ any real world (eg pricing) data. For example, one might expect household consum
 absent. For any reasonable size battery, this is unlikely to be an issue. Subsequent iterations may allow upload of retail metering data.
 
 - **driving:**  
-   \*\*Menu to access: Main Actions (sidebar): [edit parameters] / [generator_params] / [driving]
+   \*\*Menu to access: Main Actions (sidebar): [edit parameters] / [synthetic_data_params] / [driving]
   There are parameters for up to 4 trips per day. They specify, stochastically,
 
   - the probability of a trip happening;
@@ -84,15 +75,15 @@ absent. For any reasonable size battery, this is unlikely to be an issue. Subseq
   _plugged_in_ is presently set to 1 if the vehicle is not on a trip and 0 otherwise (with fractions allowing for non-integral (mostly) trip periods). Distributional assumptions for this may be important...for example, users who only plug in when they need a charge. But such users are not the target of this initial roll out of the model.
 
 - **PV:**  
-  \*\*Menu to access: Main Actions (sidebar): [edit parameters] / [generator_params] / [pv]
+  \*\*Menu to access: Main Actions (sidebar): [edit parameters] / [synthetic_data_params] / [pv]
   Capacity is probably the only obvious one.
   summer_gen_factor and winter_gen_factor are the multiples of capacity produced on a sunny day in summer and winter respectively. The pattern
   over the year is harmonic as is the pattern over a day (half a period). Presently solar is spread from 8am to 4pm every day - no seasonality.
   sunny_prob is the probability of a day being sunny (regardless of season). If it's sunny you get the full production. If it's not sunny the
-  amount of pv generation is governed by cloudy_mean_frac and cloudy_std_frac (I think std should be se).
+  amount of pv generation is governed by cloudy_mean_frac and cloudy_std_frac.
 
 - **Household consumption:**  
-  \*\*Menu to access: Main Actions (sidebar): [edit parameters] / [generator_params] / [consumption]
+  \*\*Menu to access: Main Actions (sidebar): [edit parameters] / [synthetic_data_params] / [consumption]
   base_avg is hourly energy (eg overnight). There are morning and evening peaks to be configured. Vehicle charging is separate.
 
 - **Paths**  

@@ -39,7 +39,7 @@ def autocast_params(func, params):
 def prepare_driving_params(driving_raw, autocast_params, generate_synthetic_driving):
     """
     Prepare parameters for generate_synthetic_driving from scenario dict.
-    - driving_raw: dict from scenario["generator_params"]["driving"]
+    - driving_raw: dict from scenario["synthetic_data_params"]["driving"]
     - autocast_params: function to cast types
     - generate_synthetic_driving: function reference
     Returns: dict of parameters for generate_synthetic_driving
@@ -558,8 +558,8 @@ def initialize_from_scenario(
     )
 
     # --- Synthetic data ---
-    gen_params = scenario.get("generator_params", {})
-    print(f"[DEBUG] generator_params keys: {list(gen_params.keys())}")
+    gen_params = scenario.get("synthetic_data_params", {})
+    print(f"[DEBUG] synthetic_data_params keys: {list(gen_params.keys())}")
     pv_params = autocast_params(generate_synthetic_pv, gen_params.get("pv", {}))
     df_pv = generate_synthetic_pv(**pv_params)
     st.session_state["df_pv"] = df_pv

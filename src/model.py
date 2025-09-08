@@ -874,7 +874,7 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
                 "vehicle_export",
             ]
             value_cols = st.multiselect(
-                "Select series ",
+                "Select series.  Many series can be selected - but about 6 is as many as works well ",
                 value_candidates,
                 default=default_names,
                 # default=value_candidates[:1],

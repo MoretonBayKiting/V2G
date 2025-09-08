@@ -8,7 +8,7 @@ def load_scenario(path):
 
 def get_generator_param(scenario, category, param, default):
     try:
-        return scenario["generator_params"][category][param]
+        return scenario["synthetic_data_params"][category][param]
     except (KeyError, TypeError):
         return default
 

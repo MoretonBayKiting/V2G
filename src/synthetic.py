@@ -293,6 +293,19 @@ def show_driving_summary(df_padded, df_drive_base, st):
     """
     Display summary, charts, and download widgets for synthetic driving data in Streamlit.
     """
+    if df_padded is None or df_padded.empty or "distance_km" not in df_padded.columns:
+        st.error(
+            "No driving data available or 'distance_km' column missing in df_padded."
+        )
+        return
+    if df_drive_base is None or df_drive_base.empty:
+        st.error("df_drive_base empty or missing.")
+        return
+    else:
+        if "distance_km" not in df_drive_base.columns:
+            st.error("df_drive_base empty or missing.")
+            return
+
     # st.write("Synthetic Driving Data:", df_padded.head(5))
     total_km = df_padded["distance_km"].sum()
     st.write(

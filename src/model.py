@@ -309,8 +309,8 @@ def precompute_static_columns(
     #     st.write(unweighted_arrays)
     df_all["target_soc_vehicle"] = target_soc_vehicle
     df_all["target_soc_home"] = target_soc_home
-    df_all["idx_max_home"] = idx_max_home
-    df_all["idx_max_veh"] = idx_max_veh
+    # df_all["idx_max_home"] = idx_max_home
+    # df_all["idx_max_veh"] = idx_max_veh
 
     return df_all
 
@@ -577,7 +577,7 @@ def run_model(st, home_battery, vehicle_battery, grid, kwh_per_km):
     if missing:
         st.warning(f"Missing model parameters: {', '.join(missing)}")
         return
-
+    export_df(st.session_state["export_df_flag"], df_all, "df_all_b4_precompute.csv")
     df_all = precompute_static_columns(
         st,
         df_all,
@@ -594,7 +594,7 @@ def run_model(st, home_battery, vehicle_battery, grid, kwh_per_km):
         st.session_state["vehicle_battery"],
         st.session_state["grid"],
     )
-    # export_df(results_df, "results_df1.csv")
+    export_df(st.session_state["export_df_flag"], results_df, "results_df1.csv")
 
     results_df["network_variable_cost"] = (
         -results_df["grid_import"]

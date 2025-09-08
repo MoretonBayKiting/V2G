@@ -77,15 +77,15 @@ def generate_synthetic_driving(
         # Fallback to a default single trip set if not provided
         trip_sets = [
             {
-                "probability": 0.3,
+                "probability": 0.05,
                 "weekday": True,
                 "weekend": True,
-                "distance_mean": 30,
-                "distance_logstd": 0.4,
+                "distance_mean": 400,
+                "distance_logstd": 0.0,
                 "time_mean": 8,
-                "time_std": 1,
-                "length_mean": 2,
-                "length_logstd": 0.5,
+                "time_std": 0,
+                "length_mean": 36,
+                "length_logstd": 0.0,
             }
         ]
 
@@ -112,21 +112,31 @@ def generate_synthetic_driving(
                             23,
                         )
                     )
+                    # Had planned to use log normal distributions - but likley too confusing for users.
+                    # variance_real = trip_set.get("distance_std", 30) ** 2
+                    # mean_real = trip_set.get("distance_mean", 30)
+                    # mu = np.log(mean_real**2 / np.sqrt(variance_real + mean_real**2))
+                    # sigma = np.sqrt(np.log(1 + variance_real / mean_real**2))
                     trip_distance = np.clip(
-                        np.random.lognormal(
-                            np.log(trip_set.get("distance_mean", 30)),
-                            trip_set.get("distance_std", 0.4),
+                        np.random.normal(
+                            loc=trip_set.get("distance_mean", 30),
+                            scale=trip_set.get("distance_std", 30),
                         ),
+                        # np.random.lognormal(mean=mu, sigma=sigma),
+                        # np.random.lognormal(
+                        #     np.log(trip_set.get("distance_mean", 30)),
+                        #     trip_set.get("distance_std", 0.4),
+                        # ),
                         2,
-                        300,
+                        500,
                     )
                     trip_period = np.clip(
-                        np.random.lognormal(
-                            np.log(trip_set.get("length_mean", 2)),
-                            trip_set.get("length_std", 0.5),
+                        np.random.normal(
+                            loc=trip_set.get("length_mean", 2),
+                            scale=trip_set.get("length_std", 0.5),
                         ),
                         0.5,
-                        48,
+                        60,
                     )
                     trip_hours_today.append(trip_hour)
                     rows.append(
@@ -151,11 +161,59 @@ def generate_synthetic_driving(
                 }
             )
     df_synth = pd.DataFrame(rows)
+    # filtered_synth = filter_overlapping_trips(
+    #     df_synth, n_days=365, start_date="2024-07-01"
+    # )
+    # df_expanded = expand_trips(filtered_synth[filtered_synth["distance_km"] > 0])
     df_expanded = expand_trips(df_synth[df_synth["distance_km"] > 0])
+    print(f"df_expanded.shape: {df_expanded.shape}")
+    df_expanded = df_expanded.groupby(["date", "hour"], as_index=False).agg(
+        {
+            "distance_km": "sum",
+            "plugged_in": "min",  # 0 if any trip is away, else 1
+            # Add other fields as needed, e.g.:
+            # "vehicle_consumption": "sum",
+        }
+    )
+    print(f"df_expanded.shape after agg: {df_expanded.shape}")
+    print(f"df_expanded.columns after agg: {df_expanded.columns}")
     df_padded = pad_expanded(df_expanded, start_date=start_date, n_days=n_days)
+    print(f"df_padded.shape: {df_padded.shape}")
     df_padded["season"] = df_padded["date"].apply(get_season)
     df_padded = df_padded.sort_values(["date", "hour"]).reset_index(drop=True)
     return df_padded, df_synth
+
+
+# def filter_overlapping_trips(df_synth, n_days=365, start_date="2024-07-01"):
+#     """Remove overlapping trips from df_synth, keeping the longest trip in case of overlap."""
+#     df = df_synth.copy()
+#     # Add a unique index for reference
+#     df["trip_idx"] = df.index
+#     # Calculate absolute start and end hour for each trip
+#     base_time = pd.Timestamp(start_date)
+#     df["start_dt"] = pd.to_datetime(df["date"]) + pd.to_timedelta(df["hour"], unit="h")
+#     df["start_hour_abs"] = (
+#         (df["start_dt"] - base_time).dt.total_seconds() // 3600
+#     ).astype(int)
+#     df["end_hour_abs"] = (df["start_hour_abs"] + df["trip_period_hr"]).astype(int)
+
+#     # Sort by start time, then by distance_km descending (prefer longer trips)
+#     df = df.sort_values(
+#         ["start_hour_abs", "distance_km"], ascending=[True, False]
+#     ).reset_index(drop=True)
+
+#     claimed_hours = set()
+#     keep_idxs = []
+#     for _, row in df.iterrows():
+#         trip_hours = set(range(int(row["start_hour_abs"]), int(row["end_hour_abs"])))
+#         if claimed_hours.isdisjoint(trip_hours):
+#             keep_idxs.append(row["trip_idx"])
+#             claimed_hours.update(trip_hours)
+#         # else: skip this trip (it overlaps with a previous one)
+
+#     # Return only non-overlapping trips
+#     filtered = df_synth.loc[keep_idxs].reset_index(drop=True)
+#     return filtered
 
 
 #  --- Function to expand trips over multiple hours ---
@@ -163,16 +221,15 @@ def expand_trips(df_trip):
     """Expand each trip over its duration, supporting multi-day trips."""
     expanded_rows = []
     for _, row in df_trip.iterrows():
-        start_date = pd.Timestamp(row["date"])
-        start_hour = int(row["hour"])
+        start_dt = pd.Timestamp(row["date"]) + pd.Timedelta(hours=int(row["hour"]))
         period = row["trip_period_hr"]
         whole_hours = int(period)
         remainder = period - whole_hours
         distance_per_hour = row["distance_km"] / period if period > 0 else 0
 
-        # Expand over whole hours
+        # Expand over whole hours (can cross days)
         for i in range(whole_hours):
-            dt = start_date + pd.Timedelta(hours=start_hour + i)
+            dt = start_dt + pd.Timedelta(hours=i)
             expanded_rows.append(
                 {
                     "date": dt.date(),
@@ -181,9 +238,9 @@ def expand_trips(df_trip):
                     "plugged_in": 0,
                 }
             )
-        # Partial last hour
+        # Partial last hour (if any)
         if remainder > 0:
-            dt = start_date + pd.Timedelta(hours=start_hour + whole_hours)
+            dt = start_dt + pd.Timedelta(hours=whole_hours)
             expanded_rows.append(
                 {
                     "date": dt.date(),

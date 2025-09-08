@@ -140,6 +140,15 @@ def combine_all_data(st, export=True):
     df_pv = st.session_state["df_pv"]
     df_cons = st.session_state["df_cons"]
     df_padded = st.session_state["df_padded"]
+    for k in required_keys + [
+        "df_drive_base"
+    ]:  # 20250907 Testing for duplicate records ()
+        df = st.session_state[k]
+        export_df(
+            st.session_state["export_df_flag"],
+            df,
+            k + "1.csv",
+        )
 
     df_price["date"] = pd.to_datetime(df_price["timestamp"]).dt.date
     df_all = (

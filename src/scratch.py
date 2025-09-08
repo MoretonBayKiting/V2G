@@ -4,13 +4,14 @@ import matplotlib.pyplot as plt
 import streamlit as st
 import pandas as pd
 import numpy as np
-from data_in import (
-    load_meter_data,
-    normalise_meter_data,
-    plot_daily_avg_price_per_month,
-    plot_hourly_price_by_season,
-    plot_hourly_price_se_by_season,
-)
+
+# from data_in import (
+#     load_meter_data,
+#     normalise_meter_data,
+#     plot_daily_avg_price_per_month,
+#     plot_hourly_price_by_season,
+#     plot_hourly_price_se_by_season,
+# )
 from charts import boxplot_interval, boxplot_aggpd_season
 from synthetic import (
     generate_synthetic_driving,
@@ -27,17 +28,17 @@ from synthetic import (
 
 
 # %%
-# Season classification
-def get_season(dt):
-    month = dt.month
-    if month in [12, 1, 2]:
-        return "Summer"
-    elif month in [3, 4, 5]:
-        return "Autumn"
-    elif month in [6, 7, 8]:
-        return "Winter"
-    else:
-        return "Spring"
+# # Season classification
+# def get_season(dt):
+#     month = dt.month
+#     if month in [12, 1, 2]:
+#         return "Summer"
+#     elif month in [3, 4, 5]:
+#         return "Autumn"
+#     elif month in [6, 7, 8]:
+#         return "Winter"
+#     else:
+#         return "Spring"
 
 
 # %%
@@ -329,3 +330,78 @@ for metric in ordered_metrics:
     if metric in totals.index:
         tables[unit].append(metric)
 # %%
+from synthetic import (
+    expand_trips,
+    prepare_driving_params,
+    generate_synthetic_driving,
+    pad_expanded,
+)
+
+#  tripsets here is from 2Drives.json
+trip_sets = [
+    {
+        "probability": 0.6,
+        "weekday": True,
+        "weekend": True,
+        "distance_mean": 20.0,
+        "distance_std": 6.0,
+        "time_mean": 8.0,
+        "time_std": 0.2,
+        "length_mean": 2.0,
+        "length_std": 2.0,
+    },
+    {
+        "probability": 0.05,
+        "weekday": True,
+        "weekend": True,
+        "distance_mean": 400.0,
+        "distance_std": 0.0,
+        "time_mean": 8.0,
+        "time_std": 0.0,
+        "length_mean": 48.0,
+        "length_std": 0.0,
+    },
+]
+df_padded, df_synth = generate_synthetic_driving(trip_sets=trip_sets)
+# %%
+df_all = import_df("df_all.csv")
+results_df = import_df("results_df.csv")
+df_padded = import_df("df_padded.csv")
+df_allb4 = import_df("df_all_b4_precompute.csv")
+df_drive = import_df("df_drive.csv")
+df_cons = import_df("df_cons.csv")
+df_pv = import_df("df_pv.csv")
+df_all["timestamp"] = pd.to_datetime(df_all["timestamp"])
+all_filtered = df_all[
+    df_all["timestamp"].dt.date == pd.to_datetime("2025-01-16").date()
+]
+
+df_allb4["timestamp"] = pd.to_datetime(df_allb4["timestamp"])
+df_all_b41 = df_allb4[
+    df_allb4["timestamp"].dt.date == pd.to_datetime("2025-01-16").date()
+]
+
+
+def get_test_data(df):
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    return df["timestamp"].dt.date == pd.to_datetime("2025-01-16").date()
+
+
+def get_test_data2(df):
+    return df[df["date"] == "2025-01-16"]
+
+
+dataframes = {}
+required_keys = [
+    "df_price",
+    "df_pv",
+    "df_cons",
+    "df_padded",
+]
+for k in required_keys + ["df_drive_base"]:  # 20250907 Testing for duplicate records ()
+    dataframes[k] = import_df(k + "1.csv")
+    print(f"{k}  shape: {dataframes[k].shape}")
+    # print(dataframes[k].shape)
+
+df = dataframes["df_drive_base"]
+test = df[df["distance_km"] > 240]

@@ -99,7 +99,7 @@ st.markdown(
 )
 # ...existing code...
 # Initialise with default scenario into session state
-def_scen = "drive1.json"
+def_scen = "2Drives.json"
 def_price = "priceVic.csv"
 if "scenario" not in st.session_state:
     scenario = initialize_from_scenario(

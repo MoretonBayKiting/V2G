@@ -80,11 +80,5 @@
       "public_charge_rate": 0.6,
       "export_df_flag": 0.0
     }
-  },
-  "paths": {
-    "data_paths": {
-      "price": "C:/Energy/V2G/data/NEM/price_all_1h.csv",
-      "meter": "C:/Energy/V2G/data/SmartMeterData/Exton202505.csv"
-    }
   }
 }

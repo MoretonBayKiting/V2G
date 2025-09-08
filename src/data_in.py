@@ -113,13 +113,13 @@ def get_price_data(st, price_file):
         df_price = df_price.rename(columns={"value": "price"})
         df_price["date"] = pd.to_datetime(df_price["timestamp"]).dt.date
         st.session_state["df_price"] = df_price
-        st.write("Price Data :", df_price.head(5))
         fig_daily_avg_price = plot_daily_avg_price_per_month(df_price)
         st.pyplot(fig_daily_avg_price)
         fig_hr_seas_price = plot_hourly_price_by_season(df_price)
         st.pyplot(fig_hr_seas_price)
         fig_hr_seas_price_se = plot_hourly_price_se_by_season(df_price)
         st.pyplot(fig_hr_seas_price_se)
+        st.write("Price Data:", df_price.head(5))
     return df_price
 
 

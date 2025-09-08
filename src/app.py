@@ -123,14 +123,32 @@ else:
 
 # --- Sidebar controls ---
 st.sidebar.header("Scenario Management")
-scenario_json_path = st.sidebar.text_input(
-    "Scenario (JSON file)", value=get_input_path(def_scen).replace("\\", "/")
+
+scenario_base = st.sidebar.selectbox(
+    "Choose a stored scenario 👇",
+    ["2Drives", "drive1", "scen20250831"],
+    key="scenario_selectbox",
 )
+scenario_json_path = get_input_path(scenario_base + ".json")
+
+# Add download button for Scenario
+# download_filename = get_input_path("???.csv").replace("\\", "/")
+download_filename = "???.json"
+scenario = st.session_state.get("scenario")
+if scenario is not None:
+    scenario_json = json.dumps(scenario, indent=2)
+    st.sidebar.download_button(
+        label="Download Scenario",
+        data=scenario_json,
+        file_name=download_filename,
+        mime="application/json",
+    )
+
+
 # download_filename = st.sidebar.text_input(
 #     "Download scenario as...", value="scenario_saved.json"
 # )
-# download_filename = get_input_path("???.csv").replace("\\", "/")
-download_filename = "???.json"
+
 # Autoload scenario when text input changes
 if st.session_state.get("scenario_json_path") != scenario_json_path:
     st.session_state["scenario_json_path"] = scenario_json_path
@@ -152,27 +170,33 @@ if st.session_state.get("scenario_json_path") != scenario_json_path:
         st.session_state["model_dirty"] = True
     except Exception as e:
         st.error(f"Failed to load scenario: {e}")
-# Add download button for Scenario
-scenario = st.session_state.get("scenario")
-if scenario is not None:
-    scenario_json = json.dumps(scenario, indent=2)
-    st.sidebar.download_button(
-        label="Download Scenario",
-        data=scenario_json,
-        file_name=download_filename,
-        mime="application/json",
-    )
 
 # Add sidebar options for main page control
-st.sidebar.header("⚡ Main Actions")
-main_page_option = st.sidebar.selectbox(
-    "Choose an action 👇",
-    ["edit parameters", "price data", "project model"],
-    key="main_page_option",
-)
-# ... parameter input code ...
+edit_mode = st.sidebar.button("Edit parameters", key="edit_btn")
+if edit_mode:
+    st.session_state["mode"] = "edit"
+price_mode = st.sidebar.button("Show price summaries", key="price_btn")
+if price_mode:
+    st.session_state["mode"] = "price"
+project_mode = st.sidebar.button("Project model", key="project_btn")
+if project_mode:
+    st.session_state["mode"] = "project"
+mode = st.session_state.get("mode", "edit")  # default to edit
+
 # Only show group/subgroup selectboxes if editing parameters
-if main_page_option == "edit parameters":
+if "mode" not in st.session_state:
+    st.session_state["mode"] = "edit"
+mode = st.session_state["mode"]
+
+if mode == "price":
+    price_base = st.sidebar.selectbox(
+        "Choose a stored price history file 👇",
+        ["Vic", "Qld"],
+        key="price_selectbox",
+    )
+    price_path = get_input_path(price_base + ".csv")
+
+if mode == "edit":
     group = st.sidebar.selectbox("Parameter group", list(scenario.keys()))
     subgroups = list(scenario[group].keys())
     subgroup = st.sidebar.selectbox("Subgroup", subgroups)
@@ -180,14 +204,36 @@ else:
     group = None
     subgroup = None
 
+
 show_doc = st.sidebar.checkbox("Show Documentation", value=False)
 if show_doc:
     with open("V2G.md", "r", encoding="utf-8") as f:
         doc_text = f.read()
     st.markdown(doc_text)
 
-# --- Main body ---
-if main_page_option == "edit parameters":
+# Use the selected price_path from the sidebar
+if mode == "price":
+    # Show price summaries
+    df_price = st.session_state.get("df_price")
+    if price_path and (
+        df_price is None or price_path != st.session_state.get("price_file")
+    ):
+        df_price = get_price_data(st, price_path)
+        st.session_state["df_price"] = df_price
+        st.session_state["price_file"] = price_path
+        st.session_state["model_dirty"] = True
+    if df_price is not None:
+        export_df(st.session_state["export_df_flag"], df_price, "df_price.csv")
+        if "season" in df_price.columns:
+            st.subheader(
+                "Randomly selected weekly pricing to show volatility (by season)"
+            )
+            seasons = sorted(df_price["season"].unique())
+            season = st.selectbox("Select season", seasons, key="season_select")
+            plot_volatility_timeseries(df_price, ["price"], season)
+    st.write("Current scenario - not editable:", scenario)
+
+elif mode == "edit":
     params = scenario[group][subgroup]
     edited_params = {}
 
@@ -394,50 +440,6 @@ if main_page_option == "edit parameters":
             df = st.session_state["df_cons"]
             cons_summary(df, st)
 
-    # --- Season selection and volatility chart ---
-    # if df is not None and "season" in df.columns:
-    #     st.subheader("Short Time Series: Volatility by Season")
-    #     seasons = sorted(df["season"].unique())
-    #     cols_2 = st.columns(3)
-    #     with cols_2[0]:
-    #         season = st.selectbox("Select season", seasons, key="season_select")
-    #     if season != "Any"
-    #         df_season = df[df["season"] == season]
-    #     else:
-    #         df_season = df
-    #     # Assume you want to select by start index (e.g., week start)
-    #     available_starts = df_season["date"].unique()
-    #     # Button to resample week
-    #     if (
-    #         "vol_start_idx" not in st.session_state
-    #         or st.session_state.get("season_last") != season
-    #     ):
-    #         st.session_state["vol_start_idx"] = np.random.randint(
-    #             0, len(available_starts)
-    #         )
-    #         st.session_state["season_last"] = season
-    #     with cols_2[1]:
-    #         if st.button("Resample week"):
-    #             st.session_state["vol_start_idx"] = np.random.randint(
-    #                 0, len(available_starts)
-    #             )
-    #     # Use session state to persist random start across reruns
-    #     if (
-    #         "vol_start_idx" not in st.session_state
-    #         or st.session_state["season_select"] != season
-    #     ):
-    #         st.session_state["vol_start_idx"] = np.random.randint(
-    #             0, len(available_starts)
-    #         )
-    #     with cols_2[2]:
-    #         start_idx = st.number_input(
-    #             "Start Day Index",
-    #             min_value=0,
-    #             max_value=len(available_starts) - 1,
-    #             value=st.session_state["vol_start_idx"],
-    #             key="vol_start_idx_input",
-    #         )
-    #     start_day = available_starts[start_idx]
     if df is not None and "season" in df.columns:
         st.subheader("Short Time Series: Volatility by Season")
         seasons = sorted(df["season"].unique())
@@ -487,33 +489,33 @@ if main_page_option == "edit parameters":
 
     st.write("Current scenario - not editable:", scenario)
 
-elif main_page_option == "price data":
-    st.header("Select Price Data File")
-    # Use existing price data if available
-    df_price = st.session_state.get("df_price")
-    price_file = get_price_file(st)
-    # If a new file is selected, load it and update session state
-    if price_file and (
-        df_price is None or price_file != st.session_state.get("price_file")
-    ):
-        df_price = get_price_data(st, price_file)
-        st.session_state["df_price"] = df_price
-        st.session_state["price_file"] = price_file
-        st.session_state["model_dirty"] = True
+# elif main_page_option == "price data":
+#     st.header("Select Price Data File")
+#     # Use existing price data if available
+#     df_price = st.session_state.get("df_price")
+#     price_file = get_price_file(st)
+#     # If a new file is selected, load it and update session state
+#     if price_file and (
+#         df_price is None or price_file != st.session_state.get("price_file")
+#     ):
+#         df_price = get_price_data(st, price_file)
+#         st.session_state["df_price"] = df_price
+#         st.session_state["price_file"] = price_file
+#         st.session_state["model_dirty"] = True
 
-    if df_price is not None:
-        export_df(st.session_state["export_df_flag"], df_price, "df_price.csv")
-        if "season" in df_price.columns:
-            st.subheader(
-                "Randomly selected weekly pricing to show volatility (by season)"
-            )
-            seasons = sorted(df_price["season"].unique())
-            season = st.selectbox("Select season", seasons, key="season_select")
-            plot_volatility_timeseries(df_price, ["price"], season)
-    # else:
-    # st.info("No data available or season column missing.")
-    st.write("Current scenario - not editable:", scenario)
-elif main_page_option == "project model":
+#     if df_price is not None:
+#         export_df(st.session_state["export_df_flag"], df_price, "df_price.csv")
+#         if "season" in df_price.columns:
+#             st.subheader(
+#                 "Randomly selected weekly pricing to show volatility (by season)"
+#             )
+#             seasons = sorted(df_price["season"].unique())
+#             season = st.selectbox("Select season", seasons, key="season_select")
+#             plot_volatility_timeseries(df_price, ["price"], season)
+#     # else:
+#     # st.info("No data available or season column missing.")
+#     st.write("Current scenario - not editable:", scenario)
+elif mode == "project":
     st.header("Model Results")
     # Only run model if needed
     if (

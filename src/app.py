@@ -4,17 +4,10 @@ import matplotlib.pyplot as plt
 import streamlit as st
 import pandas as pd
 import numpy as np
-import inspect
 import json
 import plotly
 from data_in import (
-    # load_meter_data,
-    # normalise_meter_data,
-    # plot_daily_avg_price_per_month,
-    # plot_hourly_price_by_season,
-    # plot_hourly_price_se_by_season,
     get_price_data,
-    # get_price_file,
     export_df,
     plot_volatility_timeseries,
     show_price_summary,

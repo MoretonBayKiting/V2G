@@ -14,9 +14,10 @@ from data_in import (
     # plot_hourly_price_by_season,
     # plot_hourly_price_se_by_season,
     get_price_data,
-    get_price_file,
+    # get_price_file,
     export_df,
     plot_volatility_timeseries,
+    show_price_summary,
 )
 
 # from charts import plot_energy_sankey  # boxplot_interval, boxplot_aggpd_season
@@ -33,11 +34,23 @@ from synthetic import (
 )
 
 from model import run_model, plot_res, export_df, combine_all_data, Battery, Grid
-
-# from scenario import load_scenario, get_generator_param, get_system_param, get_data_path
+from tariff import (
+    tariff_ui,
+    generate_synthetic_tariff_price_df,
+    consumption_ui,
+)
 
 INPUT_DIR = "data/inputs"
 PROCESSED_DIR = "data/processed"
+CONFIG_PATH = os.path.join(INPUT_DIR, "config.json")
+
+
+def load_config(config_path=CONFIG_PATH):
+    with open(config_path, "r") as f:
+        return json.load(f)
+
+
+config = load_config()
 
 
 def get_input_path(filename):
@@ -80,6 +93,7 @@ used_battery_args = [
     "target_soc_lookahead_hours",
     "export_lookahead_hours",
     "export_good_price_periods",
+    "min_export_price",
 ]
 # st.set_page_config(layout="wide") ## This to fill the width
 # Add this near the top of your app.py  # Should control width using max_width: 1200px;  But that parameter seems not very effective.
@@ -97,10 +111,15 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-# ...existing code...
 # Initialise with default scenario into session state
-def_scen = "2Drives.json"
-def_price = "Vic.csv"
+# For scenario selection
+scenario_list = config["scenarios"]
+def_scen = config.get("default_scenario", scenario_list[0]) + ".json"
+# For price selection
+price_options = config["price_files"]
+def_price = config.get("default_price", price_options[0]) + ".json"
+
+
 if "scenario" not in st.session_state:
     scenario = initialize_from_scenario(
         st,
@@ -141,7 +160,7 @@ if "scenario" not in st.session_state:
         used_battery_args,
     )
     # st.success("Scenario loaded and parameters applied.")
-    st.session_state["model_dirty"] = True
+    # st.session_state["model_dirty"] = True
     st.session_state["scenario"] = scenario
     st.session_state["scenario_json_path"] = scenario_json_path
     st.session_state["model_dirty"] = True
@@ -167,38 +186,63 @@ if "mode" not in st.session_state:
 mode = st.session_state["mode"]
 
 if mode == "price":
-    price_options = ["Vic", "Qld"]
-    # Get the current base name from session state, default to first option
-    current_price_path = st.session_state.get("price_path", get_input_path("Vic.csv"))
-    current_price_base = os.path.splitext(os.path.basename(current_price_path))[0]
+    price_options = config["price_files"]
+    # Use the value returned by the selectbox directly
     price_base = st.sidebar.selectbox(
-        "Choose a stored price history file 👇",
+        "Choose a stored price history file or tariff schedule 👇",
         price_options,
-        index=(
-            price_options.index(current_price_base)
-            if current_price_base in price_options
-            else 0
+        index=price_options.index(
+            st.session_state.get("price_selectbox", price_options[0])
         ),
         key="price_selectbox",
     )
-    price_path = get_input_path(price_base + ".csv")
-    st.session_state["price_path"] = price_path
 
-# ...existing code...
-if mode == "price" or mode == "edit" or mode == "project":
-    # Always check if price_path has changed
-    last_price_path = st.session_state.get("last_price_path")
-    if st.session_state.get("price_path") != last_price_path:
-        st.session_state["model_dirty"] = True
-        st.session_state["last_price_path"] = st.session_state.get("price_path")
-# ...existing code...
+#     if price_base == "synthetic_tariff":
+#         tariff_periods = st.session_state.get("tariff_periods", [])
+#         start_date = st.session_state.get("start_date", "2024-07-01")
+#         n_days = st.session_state.get("n_days", 365)
+#         df_price = generate_synthetic_tariff_price_df(
+#             tariff_periods, start_date=start_date, n_days=n_days
+#         )
+#         print(f"synthetic: {df_price.columns}")
+#         st.session_state["df_price"] = df_price
+#         st.session_state["model_dirty"] = True
+#         show_price_summary(df_price, st)
+#     else:
+#         price_path = get_input_path(price_base + ".csv")
+#         st.session_state["price_path"] = price_path
+#         df_price = get_price_data(price_path)
+#         print(f"not synthetic: {df_price.columns}")
+#         st.session_state["df_price"] = df_price
+#         st.session_state["price_file"] = price_path
+#         st.session_state["model_dirty"] = True
+#         show_price_summary(df_price, st)
+
 
 if mode == "edit":
+    # scenario_list = ["2Drives", "drive1", "2DrivesTest"]
+    # Get the current scenario base name (without .json)
+    current_scenario_path = st.session_state.get(
+        "scenario_json_path", get_input_path(def_scen + ".json")
+    )
+
+    # scenario_list = ["2DrivesTest", "2Drives", "drive1"]
+    # Use the last selected scenario from session state, or default
+    last_selected_scenario = st.session_state.get(
+        "selected_scenario_base", scenario_list[0]
+    )
     scenario_base = st.sidebar.selectbox(
         "Choose a stored scenario 👇",
-        ["2Drives", "drive1", "scen20250831"],
+        scenario_list,
+        index=(
+            scenario_list.index(last_selected_scenario)
+            if last_selected_scenario in scenario_list
+            else 0
+        ),
         key="scenario_selectbox",
     )
+    # Store the user's selection in session state
+    st.session_state["selected_scenario_base"] = scenario_base
     scenario_json_path = get_input_path(scenario_base + ".json")
     # Use the current price_path if available
     price_path = st.session_state.get("price_path", get_input_path(def_price + ".csv"))
@@ -244,7 +288,8 @@ else:
     group = None
     subgroup = None
 
-
+# Add a vertical spacer to push the checkboxes to the bottom
+st.sidebar.markdown("<div style='height:200px;'></div>", unsafe_allow_html=True)
 show_doc = st.sidebar.checkbox("Show User Guide", value=False)
 if show_doc:
     with open("UG.md", "r", encoding="utf-8") as f:
@@ -257,16 +302,53 @@ if show_doc:
         doc_text = f.read()
     st.markdown(doc_text)
 
-
 # Use the selected price_path from the sidebar
 if mode == "price":
-    # Select price series
-    df_price = st.session_state.get("df_price")
-    if price_path:
-        df_price = get_price_data(st, price_path)
+    # price_options = config["price_files"]
+    # # Use the value returned by the selectbox directly
+    # price_base = st.sidebar.selectbox(
+    #     "Choose a stored price history file or tariff schedule 👇",
+    #     price_options,
+    #     index=price_options.index(
+    #         st.session_state.get("price_selectbox", price_options[0])
+    #     ),
+    #     key="price_selectbox",
+    # )
+    price_base = st.session_state.get("price_selectbox", "synthetic_tariff")
+    if price_base == "synthetic_tariff":
+        st.markdown("### Synthetic Tariff Schedule")
+        if st.button("Edit Tariff Schedule"):
+            # Show the tariff editing UI
+            tariff_periods = st.session_state.get(
+                "tariff_periods", scenario["synthetic_data_params"].get("tariff", [])
+            )
+            updated_tariff = tariff_ui(tariff_periods)
+            if updated_tariff is not None:
+                st.session_state["tariff_periods"] = updated_tariff
+                # Regenerate the synthetic tariff price DataFrame
+                start_date = st.session_state.get("start_date", "2024-07-01")
+                n_days = st.session_state.get("n_days", 365)
+                df_price = generate_synthetic_tariff_price_df(
+                    updated_tariff, start_date=start_date, n_days=n_days
+                )
+                st.session_state["df_price"] = df_price
+                st.session_state["model_dirty"] = True
+                show_price_summary(df_price, st)
+        else:
+            # Show summary as before
+            df_price = st.session_state.get("df_price")
+            if df_price is not None:
+                show_price_summary(df_price, st)
+
+    else:
+        price_path = get_input_path(price_base + ".csv")
+        df_price = get_price_data(price_path)
         st.session_state["df_price"] = df_price
         st.session_state["price_file"] = price_path
         st.session_state["model_dirty"] = True
+        if df_price is not None:
+            show_price_summary(df_price, st)
+
     if df_price is not None:
         export_df(st.session_state["export_df_flag"], df_price, "df_price.csv")
         if "season" in df_price.columns:
@@ -282,30 +364,27 @@ elif mode == "edit":
     params = scenario[group][subgroup]
     edited_params = {}
 
-    st.write(f"Editing parameters for: {group} → {subgroup}")
+    # st.write(f"Editing parameters for: {group} → {subgroup}")
     # In main page, when editing driving parameters
     if group == "synthetic_data_params" and subgroup == "driving":
-        trips = params.get("trips", [])
-        # ... input widgets for trip parameters ...
-        # ... update/add/delete/save buttons ...
-        # st.write("Current trip parameters:")
-        # for i, trip in enumerate(trips):
-        #     st.write(f"Trip {i}: {trip}")
-        trip_index = st.number_input(
-            "Trip Index (base 0).  Choose or specify up to 4 (indexed from 0 to 3)",
-            min_value=0,
-            max_value=max(0, len(trips)),
-            value=0,
-        )
         st.markdown(
             """
         **Trip Parameters:**  
-        - *probability*: Probability this trip occurs on a given day  
+        - *trip index*: There are up to 4 "trip sets" - parameters for each set determine their frequency, distance, length etc  
+        - *probability*: The probability this trip occurs on a given day  
         - *weekday/weekend*: Whether trip can occur on those days  
         - *distance_mean/std*: Mean and standard deviation of trip distance (km)  
         - *time_mean/std*: Mean and std dev of departure time (hour of day)  
         - *length_mean/std*: Mean and std dev of trip duration (hours)
         """
+        )
+
+        trips = params.get("trips", [])
+        trip_index = st.number_input(
+            "Trip Index (base 0).  Choose or specify up to 4 (indexed from 0 to 3)",
+            min_value=0,
+            max_value=max(0, len(trips)),
+            value=0,
         )
 
         driving = st.session_state["scenario"]["synthetic_data_params"].get(
@@ -401,6 +480,14 @@ elif mode == "edit":
         #         json.dump(st.session_state["scenario"], f, indent=2)
         #     st.success("Scenario saved to V2g_scen1.json")
 
+    elif group == "synthetic_data_params" and subgroup == "tariff":
+        tariff_periods = tariff_ui(scenario["synthetic_data_params"]["tariff"])
+
+    elif group == "synthetic_data_params" and subgroup == "consumption":
+        consumption_periods = consumption_ui(
+            scenario["synthetic_data_params"]["consumption"]
+        )
+
     else:
         if group == "synthetic_data_params" and subgroup == "pv":
             st.markdown(
@@ -411,20 +498,6 @@ elif mode == "edit":
             - *summer_gen_factor*: Daily kWh per kW in summer  
             - *winter_gen_factor*: Daily kWh per kW in winter  
             - *cloudy_mean_frac/std_frac*: Mean and std dev of output fraction on cloudy days  
-            - *n_days*: Number of days to simulate  
-            - *seed*: Random seed for reproducibility
-            """
-            )
-        if group == "synthetic_data_params" and subgroup == "consumption":
-            st.markdown(
-                """
-            **Consumption Parameters:**  
-            - *base_avg*: Average base hourly consumption (kWh)  
-            - *base_std*: Std dev of base hourly consumption  
-            - *morning_peak_kwh*: Extra kWh used in morning peak  
-            - *morning_peak_std*: Std dev of morning peak  
-            - *evening_peak_kwh*: Extra kWh used in evening peak  
-            - *evening_peak_std*: Std dev of evening peak  
             - *n_days*: Number of days to simulate  
             - *seed*: Random seed for reproducibility
             """
@@ -445,7 +518,8 @@ elif mode == "edit":
                     edited_params[param] = new_value
 
     if st.button("Save changes & view profile"):
-        update_params(group, subgroup, edited_params)
+        if subgroup != "consumption":
+            update_params(group, subgroup, edited_params)
         # Generate and store the relevant DataFrame
         st.session_state["model_dirty"] = True
         if group == "synthetic_data_params":
@@ -468,10 +542,90 @@ elif mode == "edit":
                 st.session_state["df_pv"] = df_pv
                 export_df(st.session_state["export_df_flag"], df_pv, "df_pv.csv")
             elif subgroup == "consumption":
-                params = autocast_params(generate_synthetic_consumption, params)
-                df_cons = generate_synthetic_consumption(**params)
+                # params is now a list of activities
+                activities = params
+                n_days = st.session_state["scenario"]["synthetic_data_params"].get(
+                    "n_days", 365
+                )
+                start_date = st.session_state.get("start_date", "2024-07-01")
+                seed = st.session_state["scenario"]["synthetic_data_params"].get(
+                    "seed", None
+                )
+                df_cons = generate_synthetic_consumption(
+                    activities=activities,
+                    n_days=n_days,
+                    start_date=start_date,
+                    seed=seed,
+                )
                 st.session_state["df_cons"] = df_cons
                 export_df(st.session_state["export_df_flag"], df_cons, "df_cons.csv")
+            elif subgroup == "consumption":
+                # params is now a list of activities
+                activities = params
+                n_days = st.session_state["scenario"]["synthetic_data_params"].get(
+                    "n_days", 365
+                )
+                start_date = st.session_state.get("start_date", "2024-07-01")
+                seed = st.session_state["scenario"]["synthetic_data_params"].get(
+                    "seed", None
+                )
+                df_cons = generate_synthetic_consumption(
+                    activities=activities,
+                    n_days=n_days,
+                    start_date=start_date,
+                    seed=seed,
+                )
+                st.session_state["df_cons"] = df_cons
+                export_df(st.session_state["export_df_flag"], df_cons, "df_cons.csv")
+            elif subgroup == "consumption":
+                # params is now a list of activities
+                activities = params
+                n_days = st.session_state["scenario"]["synthetic_data_params"].get(
+                    "n_days", 365
+                )
+                start_date = st.session_state.get("start_date", "2024-07-01")
+                seed = st.session_state["scenario"]["synthetic_data_params"].get(
+                    "seed", None
+                )
+                df_cons = generate_synthetic_consumption(
+                    activities=activities,
+                    n_days=n_days,
+                    start_date=start_date,
+                    seed=seed,
+                )
+                st.session_state["df_cons"] = df_cons
+                export_df(st.session_state["export_df_flag"], df_cons, "df_cons.csv")
+            elif subgroup == "consumption":
+                # params is now a list of activities
+                activities = params
+                n_days = st.session_state["scenario"]["synthetic_data_params"].get(
+                    "n_days", 365
+                )
+                start_date = st.session_state.get("start_date", "2024-07-01")
+                seed = st.session_state["scenario"]["synthetic_data_params"].get(
+                    "seed", None
+                )
+                df_cons = generate_synthetic_consumption(
+                    activities=activities,
+                    n_days=n_days,
+                    start_date=start_date,
+                    seed=seed,
+                )
+                st.session_state["df_cons"] = df_cons
+                export_df(st.session_state["export_df_flag"], df_cons, "df_cons.csv")
+            elif subgroup == "tariff":
+                # Generate and store synthetic tariff price DataFrame
+                tariff_periods = st.session_state["scenario"]["synthetic_data_params"][
+                    "tariff"
+                ]
+                # You may want to get start_date and n_days from scenario/global params
+                start_date = st.session_state.get("start_date", "2024-07-01")
+                n_days = st.session_state["scenario"]["synthetic_data_params"].get(
+                    "n_days", 365
+                )
+                df_price = generate_synthetic_tariff_price_df(
+                    tariff_periods, start_date=start_date, n_days=n_days
+                )
 
         elif group == "system_params":
             params = scenario[group][subgroup]
@@ -494,6 +648,7 @@ elif mode == "edit":
                         "network_cost_export_per_kwh",
                         "daily_fee",
                         "max_export_kw",
+                        "fit",
                     ]
                 }
                 grid = Grid(**grid_args)
@@ -510,7 +665,6 @@ elif mode == "edit":
                     if k in params:
                         st.session_state[k] = params[k]
                         print(f"Global parameter {k}: {st.session_state[k]}")
-                # st.checkbox["export_df_flag"] = params["export_df_flag"]
 
     # --- For debugging: show current scenario dict ---
     # st.success("Parameters updated.")
@@ -578,32 +732,6 @@ elif mode == "edit":
 
     st.write("Current scenario - not editable:", scenario)
 
-# elif main_page_option == "price data":
-#     st.header("Select Price Data File")
-#     # Use existing price data if available
-#     df_price = st.session_state.get("df_price")
-#     price_file = get_price_file(st)
-#     # If a new file is selected, load it and update session state
-#     if price_file and (
-#         df_price is None or price_file != st.session_state.get("price_file")
-#     ):
-#         df_price = get_price_data(st, price_file)
-#         st.session_state["df_price"] = df_price
-#         st.session_state["price_file"] = price_file
-#         st.session_state["model_dirty"] = True
-
-#     if df_price is not None:
-#         export_df(st.session_state["export_df_flag"], df_price, "df_price.csv")
-#         if "season" in df_price.columns:
-#             st.subheader(
-#                 "Randomly selected weekly pricing to show volatility (by season)"
-#             )
-#             seasons = sorted(df_price["season"].unique())
-#             season = st.selectbox("Select season", seasons, key="season_select")
-#             plot_volatility_timeseries(df_price, ["price"], season)
-#     # else:
-#     # st.info("No data available or season column missing.")
-#     st.write("Current scenario - not editable:", scenario)
 elif mode == "project":
     st.header("Model Results")
     # Only run model if needed
@@ -658,10 +786,11 @@ elif mode == "project":
             if "selected_date_idx" not in st.session_state:
                 st.session_state["selected_date_idx"] = 0
             selected_date = st.selectbox(
-                "Select date for single day or week (weekly will start on nearest Sunday)",
+                "Select date. (Weekly uses nearest Sunday)",
                 available_dates,
                 index=st.session_state["selected_date_idx"],
                 key="single_day_date_select",
+                help="If no chart displays, make sure your date is in the right season.",
             )
             st.session_state["selected_date_idx"] = available_dates.index(selected_date)
         else:

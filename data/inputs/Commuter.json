@@ -1,0 +1,138 @@
+{
+  "synthetic_data_params": {
+    "driving": {
+      "n_days": 365,
+      "seed": 42,
+      "trips": [
+        {
+          "probability": 0.9,
+          "weekday": true,
+          "weekend": false,
+          "distance_mean": 40.0,
+          "distance_std": 10.0,
+          "time_mean": 8.0,
+          "time_std": 0.1,
+          "length_mean": 11.0,
+          "length_std": 0.1
+        },
+        {
+          "probability": 0.05,
+          "weekday": true,
+          "weekend": true,
+          "distance_mean": 400.0,
+          "distance_std": 100.0,
+          "time_mean": 12.0,
+          "time_std": 0.0,
+          "length_mean": 48.0,
+          "length_std": 10.0
+        }
+      ]
+    },
+    "pv": {
+      "capacity_kw": 8.0,
+      "sunny_prob": 0.5,
+      "summer_gen_factor": 6.0,
+      "n_days": 365.0,
+      "cloudy_mean_frac": 0.6,
+      "cloudy_std_frac": 0.2,
+      "winter_gen_factor": 4.0,
+      "seed": 42.0
+    },
+    "consumption": [
+      {
+        "start_hour": 0,
+        "rate": 0.1,
+        "length": 24.0,
+        "length_sd": 0.0,
+        "weekday": 0,
+        "weekend": 1
+      },
+      {
+        "start_hour": 6,
+        "rate": 0.2,
+        "length": 1.5,
+        "length_sd": 0.3,
+        "weekday": 1,
+        "weekend": 0
+      },
+      {
+        "start_hour": 12,
+        "rate": 0.1,
+        "length": 2.0,
+        "length_sd": 0.1,
+        "weekday": 0,
+        "weekend": 1
+      },
+      {
+        "start_hour": 18,
+        "rate": 1.8,
+        "rate_sd": 0.2,
+        "length": 2.5,
+        "length_sd": 0.7,
+        "weekday": 1,
+        "weekend": 1
+      }
+    ],
+    "tariff": [
+      {
+        "start_hour": 0,
+        "rate": 5.0
+      },
+      {
+        "start_hour": 6,
+        "rate": 15.0
+      },
+      {
+        "start_hour": 9,
+        "rate": 6.0
+      },
+      {
+        "start_hour": 15,
+        "rate": 15.0
+      },
+      {
+        "start_hour": 18,
+        "rate": 25.0
+      },
+      {
+        "start_hour": 21,
+        "rate": 5.0
+      }
+    ]
+  },
+  "system_params": {
+    "home_battery": {
+      "capacity_kwh": 0.0,
+      "max_charge_kw": 5.0,
+      "max_discharge_kw": 5.0,
+      "cycle_eff_pct": 90.0,
+      "target_soc_lookahead_hours": 48,
+      "export_lookahead_hours": 24,
+      "export_good_price_periods": 6,
+      "min_export_price": 5.0
+    },
+    "vehicle_battery": {
+      "capacity_kwh": 60,
+      "max_charge_kw": 7.0,
+      "max_discharge_kw": 7.0,
+      "cycle_eff_pct": 90,
+      "target_soc_lookahead_hours": 72,
+      "export_lookahead_hours": 24,
+      "export_good_price_periods": 6,
+      "min_export_price": 5.0
+    },
+    "grid": {
+      "network_cost_import_per_kwh": 0.15,
+      "network_cost_export_per_kwh": 0.0,
+      "daily_fee": 1.0,
+      "max_export_kw": 7.0,
+      "fit": 5.0
+    },
+    "global": {
+      "kwh_per_km": 0.18,
+      "start_date": "2024-07-01",
+      "public_charge_rate": 0.6,
+      "export_df_flag": 0.0
+    }
+  }
+}

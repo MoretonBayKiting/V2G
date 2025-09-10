@@ -1,0 +1,14 @@
+{
+  "scenarios": [
+    "2DrivesTest",
+    "Commuter",
+    "WorkFromHome"
+  ],
+  "price_files": [
+    "synthetic_tariff",
+    "Vic",
+    "Qld"
+  ],
+  "default_scenario": "WorkFromHome",
+  "default_price": "Vic"
+}

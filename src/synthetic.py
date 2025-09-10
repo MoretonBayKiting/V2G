@@ -412,7 +412,7 @@ def pv_summary(df_pv, st):
     st.session_state["df_pv"] = df_pv
     # st.write("Synthetic PV Data :", df_pv.head(5))
     st.write(f"Total PV generation: {df_pv['pv_kwh'].sum():.1f} kWh")
-    st.write(f"Average daily PV generation: {df_pv['pv_kwh'].mean():.2f} kWh")
+    st.write(f"Average daily PV generation: {df_pv['pv_kwh'].mean()*24:.2f} kWh")
 
     # Charts
     fig_seasonal = plot_pv_seasonal_avg(df_pv)
@@ -427,37 +427,56 @@ def pv_summary(df_pv, st):
 
 def generate_synthetic_consumption(
     n_days=365,
-    base_avg=0.3,  # kWh per hour (fridges etc)
-    base_std=0.2,  # standard deviation for base load
-    evening_peak_kwh=2.0,  # kWh per hour for evening peak
-    evening_peak_std=0.5,  # std for evening peak
-    morning_peak_kwh=2.0,  # kWh for morning peak
-    morning_peak_std=0.5,  # std for morning peak
+    activities=None,
     seed=42,
     start_date="2024-07-01",
 ):
     """
-    Generate synthetic hourly household consumption for a year.
-    Returns a DataFrame with columns: date, hour, consumption_kwh
+    Generate synthetic hourly household consumption for a year based on a list of activities.
+    Each activity is a dict with:
+      - start_hour: int (0-23)
+      - rate: float (kW)
+      - length: float (hours)
+      - length_sd: float (std dev of length, hours)
+      - weekday: int (1/0)
+      - weekend: int (1/0)
+    Returns a DataFrame with columns: date, hour, consumption_kwh, season
     """
     np.random.seed(seed)
+    if activities is None:
+        activities = []
     rows = []
     for day in range(n_days):
         date = pd.Timestamp(start_date) + pd.Timedelta(days=day)
+        is_weekend = date.dayofweek >= 5
+        hourly_consumption = np.zeros(24)
+        for act in activities:
+            # Only include if valid for this day type
+            if (is_weekend and act.get("weekend", 0)) or (
+                not is_weekend and act.get("weekday", 0)
+            ):
+                # Draw actual length for this instance
+                length = max(
+                    0,
+                    np.random.normal(act.get("length", 1.0), act.get("length_sd", 0.0)),
+                )
+                start_hour = int(act.get("start_hour", 0))
+                end_hour = min(24, int(np.ceil(start_hour + length)))
+                # Distribute rate over the hours spanned by the activity
+                for h in range(start_hour, end_hour):
+                    if h < 24:
+                        hourly_consumption[h] += max(
+                            0,
+                            np.random.normal(
+                                act.get("rate", 1.0), act.get("rate_sd", 0.1)
+                            ),
+                        )
         for hour in range(24):
-            # Base load
-            consumption = np.random.normal(base_avg, base_std)
-            # Evening peak: 6pm and 7pm (18, 19)
-            if hour in [18, 19]:
-                consumption += np.random.normal(evening_peak_kwh, evening_peak_std)
-            # Morning peak: 7am (7)
-            if hour == 7:
-                consumption += np.random.normal(morning_peak_kwh, morning_peak_std)
             rows.append(
                 {
                     "date": date.date(),
                     "hour": hour,
-                    "consumption_kwh": max(consumption, 0),  # no negative consumption
+                    "consumption_kwh": max(hourly_consumption[hour], 0),
                 }
             )
     df_cons = pd.DataFrame(rows)
@@ -572,14 +591,27 @@ def initialize_from_scenario(
         st.session_state["df_padded"] = pd.DataFrame()
         st.session_state["df_drive_base"] = pd.DataFrame()
 
-    cons_params = autocast_params(
-        generate_synthetic_consumption, gen_params.get("consumption", {})
+    activities = gen_params.get("consumption", [])
+    df_cons = generate_synthetic_consumption(
+        n_days=gen_params.get("n_days", 365),
+        activities=activities,
+        seed=gen_params.get("seed", 42),
+        start_date=gen_params.get("start_date", "2024-07-01"),
     )
-    df_cons = generate_synthetic_consumption(**cons_params)
     st.session_state["df_cons"] = df_cons
     export_df(st.session_state["export_df_flag"], df_cons, "df_cons.csv")
 
     # --- Price data ---
+    # Extract tariff periods for synthetic tariff support
+    tariff_periods = None
+    try:
+        tariff_periods = scenario.get("synthetic_data_params", {}).get("tariff", [])
+    except Exception:
+        tariff_periods = []
+    import streamlit as st
+
+    st.session_state["tariff_periods"] = tariff_periods
+
     if price_path and os.path.exists(price_path):
         df_price = pd.read_csv(price_path)
         df_price = df_price.rename(columns={"interval": "hour"})

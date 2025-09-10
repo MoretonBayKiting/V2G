@@ -101,10 +101,10 @@ def get_price_file(st):
     return st.file_uploader("Upload Price Data CSV", type="csv", key="price_file")
 
 
-def get_price_data(st, price_file):
+def get_price_data(price_file):
     """
-    Process uploaded price file, update session state, and display charts.
-    Returns the DataFrame or None.
+    Loads and processes a price file, returns the DataFrame.
+    No Streamlit output.
     """
     df_price = None
     if price_file:
@@ -112,7 +112,14 @@ def get_price_data(st, price_file):
         df_price = df_price.rename(columns={"interval": "hour"})
         df_price = df_price.rename(columns={"value": "price"})
         df_price["date"] = pd.to_datetime(df_price["timestamp"]).dt.date
-        st.session_state["df_price"] = df_price
+    return df_price
+
+
+def show_price_summary(df_price, st):
+    """
+    Displays summary charts and tables for a price DataFrame.
+    """
+    if df_price is not None:
         fig_daily_avg_price = plot_daily_avg_price_per_month(df_price)
         st.pyplot(fig_daily_avg_price)
         fig_hr_seas_price = plot_hourly_price_by_season(df_price)
@@ -120,7 +127,6 @@ def get_price_data(st, price_file):
         fig_hr_seas_price_se = plot_hourly_price_se_by_season(df_price)
         st.pyplot(fig_hr_seas_price_se)
         st.write("Price Data:", df_price.head(5))
-    return df_price
 
 
 def combine_all_data(st, export=True):

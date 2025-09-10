@@ -15,6 +15,7 @@ class Battery:
         max_discharge_kw,
         cycle_eff_pct,
         name="Battery",
+        min_export_price=10.0,
         soh_init=1.0,
         target_soc_lookahead_hours=72,  # Period to look ahead to assess required SoC
         export_lookahead_hours=24,  # Period to look ahead for export opportunities
@@ -29,6 +30,7 @@ class Battery:
         self.max_discharge_kw = max_discharge_kw
         self.cycle_eff_pct = cycle_eff_pct
         self.name = name
+        self.min_export_price = min_export_price
         self.target_soc_lookahead_hours = target_soc_lookahead_hours
         self.export_lookahead_hours = export_lookahead_hours
         self.export_good_price_periods = export_good_price_periods
@@ -73,11 +75,13 @@ class Grid:
         network_cost_export_per_kwh,
         daily_fee,
         max_export_kw=7,
+        fit=0.0,
     ):
         self.network_cost_import_per_kwh = network_cost_import_per_kwh
         self.network_cost_export_per_kwh = network_cost_export_per_kwh
         self.daily_fee = daily_fee
         self.max_export_kw = max_export_kw
+        self.fit = fit
 
     def __repr__(self):
         return (
@@ -229,9 +233,12 @@ def precompute_static_columns(
     df_all["effective_import_price"] = (
         df_all["price_kwh"] + grid.network_cost_import_per_kwh
     )
-    df_all["effective_export_price"] = (
-        df_all["price_kwh"] - grid.network_cost_export_per_kwh
-    )
+    if st.session_state.get("price_selectbox") == "synthetic_tariff":
+        df_all["effective_export_price"] = grid.fit
+    else:
+        df_all["effective_export_price"] = (
+            df_all["price_kwh"] - grid.network_cost_export_per_kwh
+        )
     df_all["pv_to_consumption"] = np.minimum(
         df_all["pv_kwh"], df_all["consumption_kwh"]
     )
@@ -340,12 +347,13 @@ def run_energy_flow_model(st, df_all, home_battery, vehicle_battery, grid):
         # Discharge vehicle battery to supply home consumption if plugged in
         veh_batt_discharge = 0
         # Only supply load if SoC after export >= target or present price exceeds public charge rate
-        if st.session_state["public_charge_rate"] < row.effective_export_price:
-            available_for_discharge = max(
-                vehicle_battery.soc_kwh - row.target_soc_vehicle, 0
-            )
-        else:
-            available_for_discharge = 0
+        # 20250910: Previously had this conditional on veh discharge to supply household consumption.  Definitely not a good one.
+        # if st.session_state["public_charge_rate"] < row.effective_export_price:
+        available_for_discharge = max(
+            vehicle_battery.soc_kwh - row.target_soc_vehicle, 0
+        )
+        # else:
+        # available_for_discharge = 0
         if row.plugged_in > 0:
             veh_batt_discharge = min(
                 vehicle_battery.soc_kwh,
@@ -360,7 +368,7 @@ def run_energy_flow_model(st, df_all, home_battery, vehicle_battery, grid):
         vehicle_export = 0
         if (
             row.plugged_in
-            and row.effective_export_price > 0
+            and row.effective_export_price > vehicle_battery.min_export_price
             and row.vehicle_export_allowed
         ):
             # Only export if SoC after export >= target
@@ -376,7 +384,10 @@ def run_energy_flow_model(st, df_all, home_battery, vehicle_battery, grid):
 
         # Home battery export to grid
         home_export = 0
-        if row.effective_export_price > 0 and row.home_export_allowed:
+        if (
+            row.effective_export_price > home_battery.min_export_price
+            and row.home_export_allowed
+        ):
             available_for_export = max(home_battery.soc_kwh - row.target_soc_home, 0)
             home_export = min(
                 available_for_export,

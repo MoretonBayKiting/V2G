@@ -44,7 +44,7 @@ def sankey_energy_check(flows):
     double_counted_keys = [
         ("PV", "Home Battery"),
         ("PV", "Vehicle Battery"),
-        ("Vehicle Battery", "Driving Discharge"),
+        # ("Vehicle Battery", "Driving Discharge"),
         # ("Home Battery", "Consumption"),
         # ("Home Battery", "Export"),
         # ("Home Battery", "Home Battery Loss"),
@@ -119,15 +119,6 @@ def plot_energy_sankey(totals):
         ),
         (
             "Vehicle Battery",
-            "Driving Discharge",
-            (
-                totals.loc["driving_discharge"]
-                if "driving_discharge" in totals.index
-                else 0
-            ),
-        ),
-        (
-            "Driving Discharge",
             "Vehicle Consumption",
             (
                 totals.loc["driving_discharge"]
@@ -135,6 +126,15 @@ def plot_energy_sankey(totals):
                 else 0
             ),
         ),
+        # (
+        # "Driving Discharge",
+        #     "Vehicle Consumption",
+        #     (
+        #         totals.loc["driving_discharge"]
+        #         if "driving_discharge" in totals.index
+        #         else 0
+        #     ),
+        # ),
     ]
 
     # Build node list

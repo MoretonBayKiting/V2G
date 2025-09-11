@@ -26,6 +26,7 @@ from synthetic import (
     prepare_driving_params,
 )
 
+# Trivial change to force a rebuild.  Streamlit Community Cloud can't find get_summary_table()
 from model import (
     run_model,
     plot_res,

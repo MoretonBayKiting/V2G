@@ -967,6 +967,7 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
         st.info("No data available or season column missing.")
 
 
+# This comment is a trivial change to force a rebuild.  Streamlit Community Cloud can't find get_summary_table()
 def get_summary_table(df, period="totals", public_charge_rate=None):
     exclude_cols = [
         "timestamp",

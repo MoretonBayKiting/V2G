@@ -63,7 +63,7 @@ It assumes an Amber pricing model - ie energy flows to and from the grid at whol
      - _Daily average_: Perhaps not that helpful. Let me know what you think.
 
 7. **Store results**
-   - There is no comprehensive reporting. Print from browser to pdf in the short term. The full parameter set being used is printed to the screen at the bottom of many of the input screens. Print from there if you need a record of your inputs. (Though there is the download option for input parameters.)
+   - There's a new save/download button below results in main page. That will dump inputs and summary results to a json file. Alternatively, print from the browser.
 
 ## Notes
 

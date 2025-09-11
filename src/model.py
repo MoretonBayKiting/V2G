@@ -965,3 +965,87 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
 
     else:
         st.info("No data available or season column missing.")
+
+
+def get_summary_table(df, period="totals", public_charge_rate=None):
+    exclude_cols = [
+        "timestamp",
+        "season",
+        "home_batt_soc",
+        "veh_batt_soc",
+        "home_batt_soh",
+        "veh_batt_soh",
+        "is_sunny",
+        "plugged_in",
+        "price",
+        "hour",
+        "effective_import_price",
+        "effective_export_price",
+        "remaining_consumption",
+        "price_kwh",
+        "month",
+        "target_soc_total",
+        "target_soc_vehicle",
+        "target_soc_home",
+        "vehicle_export_allowed",
+        "home_export_allowed",
+    ]
+    numeric_cols = [
+        col
+        for col in df.columns
+        if pd.api.types.is_numeric_dtype(df[col]) and col not in exclude_cols
+    ]
+    if period == "daily_averages":
+        totals = (df[numeric_cols].mean() * 24).to_frame(name="Total")
+    else:
+        totals = df[numeric_cols].sum().to_frame(name="Total")
+    totals.index.name = "Metric"
+
+    def safe_divide(totals, num, denom):
+        num_val = totals.loc[num, "Total"] if num in totals.index else np.nan
+        denom_val = totals.loc[denom, "Total"] if denom in totals.index else np.nan
+        return 100 * (num_val / denom_val) if denom_val not in [0, np.nan] else np.nan
+
+    totals.loc["veh_export_rate", "Total"] = safe_divide(
+        totals, "veh_earnings", "vehicle_export"
+    )
+    totals.loc["home_export_rate", "Total"] = safe_divide(
+        totals, "home_earnings", "home_export"
+    )
+    totals.loc["grid_import_rate", "Total"] = safe_divide(
+        totals, "grid_import_cost", "grid_import"
+    )
+    totals.loc["pv_export_rate", "Total"] = safe_divide(
+        totals, "pv_earnings", "pv_export"
+    )
+    totals.loc["curtailment_rate", "Total"] = safe_divide(
+        totals, "curtailment_op_cost", "curtailment"
+    )
+    totals.loc["grid_energy_rate", "Total"] = -safe_divide(
+        totals, "grid_energy_cost", "grid_import"
+    )
+    if public_charge_rate is not None:
+        totals.loc["public_charge_cost", "Total"] = (
+            -totals.loc["public_charge", "Total"] * public_charge_rate
+        )
+        totals.loc["public_charge_rate", "Total"] = public_charge_rate * 100
+
+    # Net Earnings logic
+    metric_units = {
+        "home_earnings": ("$", 1),
+        "veh_earnings": ("$", 1),
+        "pv_earnings": ("$", 1),
+        "network_variable_cost": ("$", 1),
+        "network_fixed_cost": ("$", 1),
+        "grid_energy_cost": ("$", 1),
+        "public_charge_cost": ("$", 1),
+    }
+    contributing = [
+        m for m, v in metric_units.items() if m in totals.index and v[1] != 0
+    ]
+    net_earnings = sum(
+        totals.loc[m, "Total"] * metric_units[m][1] for m in contributing
+    )
+    totals.loc["Net Earnings", "Total"] = net_earnings
+
+    return totals

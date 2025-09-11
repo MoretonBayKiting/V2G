@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import json
-import plotly
+import datetime
 from data_in import (
     get_price_data,
     export_df,
@@ -26,7 +26,15 @@ from synthetic import (
     prepare_driving_params,
 )
 
-from model import run_model, plot_res, export_df, combine_all_data, Battery, Grid
+from model import (
+    run_model,
+    plot_res,
+    export_df,
+    combine_all_data,
+    get_summary_table,
+    Battery,
+    Grid,
+)
 from tariff import (
     tariff_ui,
     generate_synthetic_tariff_price_df,
@@ -811,4 +819,45 @@ elif mode == "project":
             st.session_state["selected_date_idx"] = available_dates.index(selected_date)
 
     plot_res(st, st.session_state["results_df"], chart_type, period, selected_date)
-# st.write("Current scenario (not editable):", st.session_state["scenario"])
+
+    st.subheader("Save Scenario & Results")
+    description = st.text_input("Short description for this run (optional):")
+    if st.button("Save Results"):
+        # Gather data
+        scenario = st.session_state.get("scenario", {})
+        price_file = st.session_state.get(
+            "price_file", st.session_state.get("price_selectbox", "")
+        )
+        # Get summary table (reuse your summary table logic)
+        results_df = st.session_state.get("results_df")
+        summary_table = None
+        if results_df is not None:
+            public_charge_rate = st.session_state.get("public_charge_rate", 0)
+            summary_df = get_summary_table(
+                results_df, period="totals", public_charge_rate=public_charge_rate
+            )
+            summary_table = summary_df["Total"].to_dict()
+        # Compose output
+        output = {
+            "description": description,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "scenario": scenario,
+            "price_file": price_file,
+            "summary_table": summary_table,
+        }
+        # Save to file
+        # save_dir = "data/processed/archived_results"
+        # os.makedirs(save_dir, exist_ok=True)
+        filename = f"results_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        # filepath = os.path.join(save_dir, filename)
+        # with open(filepath, "w") as f:
+        #     json.dump(output, f, indent=2)
+        # st.success(f"Results saved to {filepath}")
+
+        json_str = json.dumps(output, indent=2)
+        st.download_button(
+            label="Download Results JSON",
+            data=json_str,
+            file_name=filename,
+            mime="application/json",
+        )

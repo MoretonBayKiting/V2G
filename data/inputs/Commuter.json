@@ -109,7 +109,7 @@
       "target_soc_lookahead_hours": 48,
       "export_lookahead_hours": 24,
       "export_good_price_periods": 6,
-      "min_export_price": 5.0
+      "min_export_price": 0.5
     },
     "vehicle_battery": {
       "capacity_kwh": 60,
@@ -119,7 +119,7 @@
       "target_soc_lookahead_hours": 72,
       "export_lookahead_hours": 24,
       "export_good_price_periods": 6,
-      "min_export_price": 5.0
+      "min_export_price": 0.5
     },
     "grid": {
       "network_cost_import_per_kwh": 0.15,

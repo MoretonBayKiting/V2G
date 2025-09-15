@@ -4,26 +4,31 @@ import matplotlib.pyplot as plt
 import plotly
 import altair as alt
 from data_in import combine_all_data, plot_volatility_timeseries, export_df
-from charts import plot_energy_sankey
+from charts import (
+    plot_energy_sankey,
+    import_export_price_hist,
+    plot_cumulative_earnings_costs,
+    plot_flow_stacked_by_price,
+)
 
 
 class Battery:
     def __init__(
         self,
-        capacity_kwh,
-        max_charge_kw,
-        max_discharge_kw,
-        cycle_eff_pct,
+        capacity_kwh: float,
+        max_charge_kw: float,
+        max_discharge_kw: float,
+        cycle_eff_pct: float,
         name="Battery",
-        min_export_price=10.0,
-        soh_init=1.0,
-        target_soc_lookahead_hours=72,  # Period to look ahead to assess required SoC
-        export_lookahead_hours=24,  # Period to look ahead for export opportunities
-        export_good_price_periods=6,  # Number of good price hours in look ahead period in which to export
-        cal_deg_linear=1e-4,  # calendar degradation rate (linear per hour)
-        cal_deg_sqrt=1e-4,  # calendar degradation rate (sqrt per sqrt(hour))
-        cyc_deg_exp_drive=2.0,  # cycling exponent for driving
-        cyc_deg_exp_charge=1.5,  # cycling exponent for charging
+        min_export_price: float = 10.0,
+        soh_init: float = 1.0,
+        target_soc_lookahead_hours: int = 72,  # Period to look ahead to assess required SoC
+        export_lookahead_hours: int = 24,  # Period to look ahead for export opportunities
+        export_good_price_periods: int = 6,  # Number of good price hours in look ahead period in which to export
+        cal_deg_linear: float = 1e-4,  # calendar degradation rate (linear per hour)
+        cal_deg_sqrt: float = 1e-4,  # calendar degradation rate (sqrt per sqrt(hour))
+        cyc_deg_exp_drive: float = 2.0,  # cycling exponent for driving
+        cyc_deg_exp_charge: float = 1.5,  # cycling exponent for charging
     ):
         self.capacity_kwh = capacity_kwh
         self.max_charge_kw = max_charge_kw
@@ -31,9 +36,9 @@ class Battery:
         self.cycle_eff_pct = cycle_eff_pct
         self.name = name
         self.min_export_price = min_export_price
-        self.target_soc_lookahead_hours = target_soc_lookahead_hours
-        self.export_lookahead_hours = export_lookahead_hours
-        self.export_good_price_periods = export_good_price_periods
+        self.target_soc_lookahead_hours = int(target_soc_lookahead_hours)
+        self.export_lookahead_hours = int(export_lookahead_hours)
+        self.export_good_price_periods = int(export_good_price_periods)
         # self.soc_kwh = 0  # State of charge
         self.soc_kwh = capacity_kwh / 2
         self.soh = soh_init  # State of health (fraction, 1.0 = new)
@@ -115,6 +120,26 @@ def vectorized_export_opportunity(
         # If current hour is among top_n, allow export
         if 0 in top_indices:
             export_mask[i] = True
+    return export_mask
+
+
+def export_opportunity_with_spread(
+    df, price_col="price_kwh", lookahead_hours=24, top_n=1, spread_threshold=0.25
+):
+    prices = df[price_col].values
+    n = len(prices)
+    pad = np.zeros(int(lookahead_hours) - 1)
+    prices_padded = np.concatenate([prices, pad])
+    lookahead_hours = int(lookahead_hours)
+    windows = np.lib.stride_tricks.sliding_window_view(prices_padded, lookahead_hours)
+    export_mask = np.zeros(n, dtype=bool)
+    for i in range(n):
+        window = windows[i]
+        spread = np.mean(np.sort(window)[-top_n:]) - np.mean(np.sort(window)[:top_n])
+        if spread > spread_threshold:
+            top_indices = np.argpartition(window, -top_n)[-top_n:]
+            if 0 in top_indices:
+                export_mask[i] = True
     return export_mask
 
 
@@ -229,7 +254,10 @@ def precompute_static_columns(
     start = time.time()
     df_all = df_all.fillna(0)
     df_all = df_all.sort_values(["date", "hour"]).reset_index(drop=True)
-    df_all["price_kwh"] = df_all["price"] / 1000
+    df_all["price_kwh"] = (
+        df_all["price"] / 100
+    )  # 20250912: The divisor was 1000.  It's now stored as c/kWhr in df_price (where 20c is 20, not 0.20).  For model, 20c is $0.2
+    df_all = df_all.drop(columns=["price"])
     df_all["effective_import_price"] = (
         df_all["price_kwh"] + grid.network_cost_import_per_kwh
     )
@@ -247,17 +275,18 @@ def precompute_static_columns(
     )
     df_all["vehicle_consumption"] = df_all["distance_km"] * kwh_per_km
 
-    df_all["vehicle_export_allowed"] = vectorized_export_opportunity(
+    # df_all["vehicle_export_allowed"] = vectorized_export_opportunity(
+    df_all["vehicle_export_allowed"] = export_opportunity_with_spread(
         df_all,
         price_col="price_kwh",
-        lookahead_hours=vehicle_battery.export_lookahead_hours,
-        top_n=vehicle_battery.export_good_price_periods,
+        lookahead_hours=int(vehicle_battery.export_lookahead_hours),
+        top_n=int(vehicle_battery.export_good_price_periods),
     )
-    df_all["home_export_allowed"] = vectorized_export_opportunity(
+    df_all["home_export_allowed"] = export_opportunity_with_spread(
         df_all,
         price_col="price_kwh",
-        lookahead_hours=home_battery.export_lookahead_hours,
-        top_n=home_battery.export_good_price_periods,
+        lookahead_hours=int(home_battery.export_lookahead_hours),
+        top_n=int(home_battery.export_good_price_periods),
     )
 
     df_all["public_charge_rate"] = st.session_state["public_charge_rate"]
@@ -368,7 +397,9 @@ def run_energy_flow_model(st, df_all, home_battery, vehicle_battery, grid):
         vehicle_export = 0
         if (
             row.plugged_in
-            and row.effective_export_price > vehicle_battery.min_export_price
+            and row.effective_export_price
+            > vehicle_battery.min_export_price
+            / 100  # 20250915. min_export_price stored as c/kWh but used as $/kWh
             and row.vehicle_export_allowed
         ):
             # Only export if SoC after export >= target
@@ -385,7 +416,9 @@ def run_energy_flow_model(st, df_all, home_battery, vehicle_battery, grid):
         # Home battery export to grid
         home_export = 0
         if (
-            row.effective_export_price > home_battery.min_export_price
+            row.effective_export_price
+            > home_battery.min_export_price
+            / 100  # 20250915. min_export_price stored as c/kWh but used as $/kWh
             and row.home_export_allowed
         ):
             available_for_export = max(home_battery.soc_kwh - row.target_soc_home, 0)
@@ -841,40 +874,53 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
                 totals["Total"]
             )
 
-            source = ["pv_kwh", "grid_import", "public_charge"]
-            sink = [
-                "consumption_kwh",
-                "vehicle_consumption",
-                "curtailment",
-                "pv_export",
-                "vehicle_export",
-                "home_export",
-                "home_batt_loss",
-                "veh_batt_loss",
-            ]
-            total_source = sum(
-                totals.loc[s, "Total"] for s in source if s in totals.index
-            )
-            total_sink = sum(totals.loc[s, "Total"] for s in sink if s in totals.index)
-            st.plotly_chart(sankey_fig, use_container_width=True)
-            st.write(f"Sum of flows: {total_flow:.2f} kWh")
-            st.write(f"Double counted: {double_counted_sum:.2f} kWh")
-            st.write(f"Net: {net_flow:.2f} kWh")
-            st.write(f"Source: {total_source:.2f} kWh")
-            st.write(f"Sink: {total_sink:.2f} kWh")
+            if st.session_state.get("results_df") is not None:
+                df = st.session_state["results_df"]
+                st.markdown(
+                    """    
+                    This chart shows, for each price bin (x-axis, c/kWh):
 
-            if st.session_state["export_df_flag"]:
-                st.write(totals)
+                - **Light bars (left y-axis):** 
+                    - Number of periods per bin with no flow to grid (neither import nor export)
+                - **Solid bar (right y-axis):** 
+                    - Grid import only (blue, bottom)
+                    - Home export only (orange)
+                    - Vehicle export only (green)
+                    - Both home and vehicle export (red, top)
+
+                - **Black dots (right floating y-axis):** 
+                    - Net value (in dollars) of flows in bin.
+                    - The sum of all the dots (net values) equals the total net value (excl daily network fee)
+                    """,
+                    unsafe_allow_html=True,
+                )
+                fig, stacked_df = plot_flow_stacked_by_price(
+                    df, price_col="price_kwh", st=st, price_max=100, above=False
+                )
+                # if fig is not None:
+                #     st.pyplot(fig)
+                if stacked_df is not None:
+                    export_df(
+                        st.session_state["export_df_flag"],
+                        stacked_df,
+                        "stacked_df_low.csv",
+                    )
+                # For prices ≥ 100c/kWh
+                fig, stacked_df = plot_flow_stacked_by_price(
+                    df, price_col="price_kwh", st=st, price_max=100, above=True
+                )
+                # if fig is not None:
+                #     st.pyplot(fig)
+                if stacked_df is not None:
+                    export_df(
+                        st.session_state["export_df_flag"],
+                        stacked_df,
+                        "stacked_df_hi.csv",
+                    )
+                plot_cumulative_earnings_costs(df, st=st)
+                import_export_price_hist(df, st, bins=30)
 
         else:
-            # default_names = [
-            #     "pv_kwh",
-            #     "grid_import",
-            #     "veh_batt_soc",
-            #     "home_batt_soc",
-            #     "target_soc_home",
-            #     "target_soc_vehicle",
-            # ]
             default_names = [
                 "pv_kwh",
                 "veh_batt_soc",

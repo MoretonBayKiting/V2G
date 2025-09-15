@@ -405,3 +405,217 @@ for k in required_keys + ["df_drive_base"]:  # 20250907 Testing for duplicate re
 
 df = dataframes["df_drive_base"]
 test = df[df["distance_km"] > 240]
+
+results_df = import_df("results_df.csv")
+veh_exp_cols = [
+    "vehicle_export",
+    "effective_export_price",
+    "date",
+    "hour",
+    "target_soc_vehicle",
+    "veh_batt_soc",
+    "price_kwh",
+    "price",
+]
+veh_exp = results_df[results_df["vehicle_export"] > 0]
+veh_exp[veh_exp_cols].sort_values(by="effective_export_price", ascending=False)
+
+
+import numpy as np
+import pandas as pd
+
+
+def rolling_price_spread_components(df, price_col="effective_import_price", m=72, n=12):
+    """
+    Returns three Series: spread, highest_means, lowest_means, all aligned to df.index.
+    """
+    prices = df[price_col].values
+    if len(prices) < m:
+        nan_series = pd.Series(np.nan, index=df.index)
+        return nan_series, nan_series, nan_series
+    windows = np.lib.stride_tricks.sliding_window_view(prices, m)
+    sorted_windows = np.sort(windows, axis=1)
+    highest_means = sorted_windows[:, -n:].mean(axis=1)
+    lowest_means = sorted_windows[:, :n].mean(axis=1)
+    spread = highest_means - lowest_means
+    # Pad to align with df.index
+    pad = np.full(len(prices), np.nan)
+    pad[m - 1 :] = spread
+    spread_series = pd.Series(pad, index=df.index)
+    pad_high = np.full(len(prices), np.nan)
+    pad_high[m - 1 :] = highest_means
+    highest_series = pd.Series(pad_high, index=df.index)
+    pad_low = np.full(len(prices), np.nan)
+    pad_low[m - 1 :] = lowest_means
+    lowest_series = pd.Series(pad_low, index=df.index)
+    return spread_series, highest_series, lowest_series
+
+
+# Usage:
+# %%
+lookaheard_period = 24
+number_of_periods = 6
+spread, highest, lowest = rolling_price_spread_components(
+    df, price_col="price", m=lookaheard_period, n=number_of_periods
+)
+
+# plt.figure(figsize=(12, 4))
+# plt.plot(spread, label="Spread (High - Low)")
+# plt.plot(highest, label="Mean of n Highest")
+# plt.plot(lowest, label="Mean of n Lowest")
+# plt.xlabel("Index")
+# plt.ylabel("c/kWh")
+# plt.title("Rolling Price Spread and Components")
+# plt.legend()
+# plt.grid(True)
+# plt.tight_layout()
+# plt.show()
+# print("Mean spread:", np.nanmean(spread))
+# print("Mean high:", np.nanmean(highest))
+# print("Mean low:", np.nanmean(lowest))
+
+df = results_df[["month", "price"]]
+# Add the results to the DataFrame for grouping
+df["spread"] = spread
+df["highest"] = highest
+df["lowest"] = lowest
+
+# Group by month and calculate means (skip NaN)
+monthly_means = df.groupby("month")[["spread", "highest", "lowest", "price"]].mean()
+plot_path = (
+    f"C:/Energy/V2G/data/processed/Spreads{lookaheard_period}_{number_of_periods}.png"
+)
+# Plot
+plt.figure(figsize=(10, 5))
+plt.plot(monthly_means.index, monthly_means["spread"], label="Spread (High - Low)")
+plt.plot(
+    monthly_means.index,
+    monthly_means["highest"],
+    label=f"Mean of {number_of_periods} Highest",
+)
+plt.plot(
+    monthly_means.index,
+    monthly_means["lowest"],
+    label=f"Mean of {number_of_periods} Lowest",
+)
+plt.plot(monthly_means.index, monthly_means["price"], label="Mean of price")
+plt.xlabel("Month")
+plt.ylabel("$/MWh")
+plt.title(
+    f"Monthly Means of Rolling Price Spread and Components. lookaheard_period = {lookaheard_period}; number_of_periods = {number_of_periods}"
+)
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+# Add mean spread as a text box in the upper left
+mean_spread = np.nanmean(spread)
+plt.gca().text(
+    0.01,
+    0.98,
+    f"Mean spread: {mean_spread:.2f} c/MWh",
+    transform=plt.gca().transAxes,
+    fontsize=11,
+    verticalalignment="top",
+    bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7),
+)
+plt.savefig(plot_path)
+plt.show()
+
+# %% Assume df has 'vehicle_export', 'home_export', 'veh_earnings', 'home_earnings', 'grid_import', 'grid_import_cost'
+# Vehicle export earnings
+veh_earnings = df["veh_earnings"].fillna(0)
+veh_earnings = veh_earnings[veh_earnings > 0]
+veh_sorted = np.sort(veh_earnings)[::-1]
+veh_cum = np.cumsum(veh_sorted)
+veh_cum /= veh_cum[-1]
+
+# Home export earnings
+home_earnings = df["home_earnings"].fillna(0)
+home_earnings = home_earnings[home_earnings > 0]
+home_sorted = np.sort(home_earnings)[::-1]
+home_cum = np.cumsum(home_sorted)
+if len(home_cum) > 0:
+    home_cum /= home_cum[-1]
+
+# Import costs (positive values)
+import_costs = df["grid_import_cost"].fillna(0)
+import_costs = import_costs[import_costs > 0]
+import_sorted = np.sort(import_costs)[::-1]
+import_cum = np.cumsum(import_sorted)
+if len(import_cum) > 0:
+    import_cum /= import_cum[-1]
+
+plt.figure(figsize=(8, 5))
+plt.plot(
+    np.linspace(0, 100, len(veh_cum)), veh_cum * 100, label="Vehicle Export Earnings"
+)
+if len(home_cum) > 0:
+    plt.plot(
+        np.linspace(0, 100, len(home_cum)), home_cum * 100, label="Home Export Earnings"
+    )
+if len(import_cum) > 0:
+    plt.plot(
+        np.linspace(0, 100, len(import_cum)), import_cum * 100, label="Import Costs"
+    )
+
+plt.xlabel("% of periods (sorted by value, highest to lowest)")
+plt.ylabel("Cumulative % of total")
+plt.title("Concentration of Earnings and Costs by Period")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+# %% Assume df has 'price', 'vehicle_export', 'home_export', 'grid_import'
+df = import_df("results_df.csv")
+price_col = "price_kwh"
+bin_width = 5  # c/kWh
+max_price = df[price_col].max()
+min_price = df[price_col].min()
+print(f"min_price: {min_price:.2f}, max_price: {max_price:.2f}")
+# bins = np.arange(0, max_price + bin_width, bin_width)
+bins = np.arange(
+    np.floor(min_price / bin_width) * bin_width, max_price + bin_width, bin_width
+)
+
+# Masks for each flow
+veh_mask = df["vehicle_export"] > 0
+home_mask = df["home_export"] > 0
+import_mask = df["grid_import"] > 0
+
+# Histogram: count of periods in each price bin where flow occurred
+# Calculate total periods in each price bin
+total_hist, _ = np.histogram(df[price_col], bins=bins)
+
+# For each flow, count periods in bin where flow occurred
+veh_hist, _ = np.histogram(df.loc[veh_mask, price_col], bins=bins)
+home_hist, _ = np.histogram(df.loc[home_mask, price_col], bins=bins)
+import_hist, _ = np.histogram(df.loc[import_mask, price_col], bins=bins)
+
+# Avoid division by zero
+with np.errstate(divide="ignore", invalid="ignore"):
+    veh_prop = np.where(total_hist > 0, veh_hist / total_hist, np.nan)
+    home_prop = np.where(total_hist > 0, home_hist / total_hist, np.nan)
+    import_prop = np.where(total_hist > 0, import_hist / total_hist, np.nan)
+
+bin_centers = (bins[:-1] + bins[1:]) / 2
+
+plt.figure(figsize=(10, 5))
+plt.step(bin_centers, veh_prop, where="mid", label="Vehicle Export", color="tab:blue")
+plt.step(bin_centers, home_prop, where="mid", label="Home Export", color="tab:orange")
+plt.step(bin_centers, import_prop, where="mid", label="Import", color="tab:green")
+plt.xlabel("Price (c/kWh)")
+plt.ylabel("Proportion of periods in bin")
+plt.title("Proportion of Periods with Flow by Price Bucket")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+# %%
+df_price = import_df("df_price.csv")
+df_price.sort_values(by="price", ascending=False)
+df = import_df("results_df.csv")
+df["price", "price_kwh"].sort_values(by="price", ascending=False)
+qld = import_df("Qld.csv")
+qld.sort_values(by="value", ascending=False)
+
+# %%

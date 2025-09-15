@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import random
 import os
+from charts import rolling_price_spread_components, plot_monthly_spread_summary
 
 
 def load_meter_data(file):
@@ -46,14 +47,15 @@ def plot_daily_avg_price_per_month(df_price):
     """Plot daily average price per month."""
     df_price["date"] = pd.to_datetime(df_price["timestamp"]).dt.date
     df_price["month"] = pd.to_datetime(df_price["timestamp"]).dt.month
-    daily_avg = (
-        df_price.groupby(["month", "date"])["price"].mean().groupby("month").mean()
-    )
+    # daily_avg = (
+    # df_price.groupby(["month", "date"])["price"].mean().groupby("month").mean()
+    # )
+    mthly_avg = df_price.groupby(["month"])["price"].mean()
     fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(daily_avg.index, daily_avg.values, marker="o")
-    ax.set_title("Daily Average Price per Month")
+    ax.plot(mthly_avg.index, mthly_avg.values, marker="o")
+    ax.set_title("Average wholesale energy price - not volume weighted")
     ax.set_xlabel("Month")
-    ax.set_ylabel("Average Daily Price")
+    ax.set_ylabel("Average Energy Price c/kWh")
     ax.set_xticks(range(1, 13))
     ax.grid(True)
     plt.tight_layout()
@@ -68,9 +70,9 @@ def plot_hourly_price_by_season(df_price):
         df_season = df_price[df_price["season"] == season]
         hourly_avg = df_season.groupby("hour")["price"].mean()
         ax.plot(hourly_avg.index, hourly_avg.values, marker="o", label=season)
-    ax.set_title("Average Hourly Price by Season")
+    ax.set_title("Average Hourly Wholesale Energy Price")
     ax.set_xlabel("Hour of Day")
-    ax.set_ylabel("Average Price")
+    ax.set_ylabel("Average Price c/kWh")
     ax.legend()
     ax.grid(True)
     plt.tight_layout()
@@ -110,8 +112,10 @@ def get_price_data(price_file):
     if price_file:
         df_price = pd.read_csv(price_file)
         df_price = df_price.rename(columns={"interval": "hour"})
-        df_price = df_price.rename(columns={"value": "price"})
+        # df_price = df_price.rename(columns={"value": "price"})
+        df_price["price"] = df_price["value"] / 10  # Convert $/MWh to c/kWh
         df_price["date"] = pd.to_datetime(df_price["timestamp"]).dt.date
+        # Convert $/MWh to c/kWh
     return df_price
 
 
@@ -126,6 +130,20 @@ def show_price_summary(df_price, st):
         st.pyplot(fig_hr_seas_price)
         fig_hr_seas_price_se = plot_hourly_price_se_by_season(df_price)
         st.pyplot(fig_hr_seas_price_se)
+        st.markdown(
+            """
+**Rolling Price Spread Diagnostic**
+
+The chart below shows the monthly means of the rolling price spread and its components, using two different window/period settings (72/12 and 24/6):
+
+- For each rolling window of length *m* hours (e.g., 72 or 24), we calculate the mean of the *n* (12 or 6 shown here) highest prices and the mean of the *n* lowest prices within that window.
+- The **spread** is the difference between these two means, representing the average price gap available for battery arbitrage (buy low, sell high) over each window.
+- The **Mean of n Highest** and **Mean of n Lowest** lines show the typical price levels at the top and bottom of each window, respectively.
+
+This diagnostic helps visualize the potential for battery trading: a larger spread indicates more frequent or larger arbitrage opportunities. The chart is shown for two parameter sets to illustrate both short-term (daily) and medium-term (3-day) price variability.
+"""
+        )
+        plot_monthly_spread_summary(df_price, price_col="price")
         st.write("Price Data:", df_price.head(5))
 
 
@@ -254,7 +272,11 @@ def plot_volatility_timeseries(
     plt.tight_layout()
     st.pyplot(fig)
     cols = ["date", "hour"] + value_cols
-    st.write(df_plot[cols])
+    df_to_show = df_plot[cols].copy()
+    float_cols = df_to_show.select_dtypes(include="float").columns
+    # df_to_show[float_cols] = df_to_show[float_cols].applymap(lambda x: f"{x:,.2f}")
+    df_to_show[float_cols] = df_to_show[float_cols].round(2)
+    st.write(df_to_show)
 
 
 def export_df(export_flag, df, filename):

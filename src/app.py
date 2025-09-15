@@ -199,30 +199,8 @@ if mode == "price":
         key="price_selectbox",
     )
 
-#     if price_base == "synthetic_tariff":
-#         tariff_periods = st.session_state.get("tariff_periods", [])
-#         start_date = st.session_state.get("start_date", "2024-07-01")
-#         n_days = st.session_state.get("n_days", 365)
-#         df_price = generate_synthetic_tariff_price_df(
-#             tariff_periods, start_date=start_date, n_days=n_days
-#         )
-#         print(f"synthetic: {df_price.columns}")
-#         st.session_state["df_price"] = df_price
-#         st.session_state["model_dirty"] = True
-#         show_price_summary(df_price, st)
-#     else:
-#         price_path = get_input_path(price_base + ".csv")
-#         st.session_state["price_path"] = price_path
-#         df_price = get_price_data(price_path)
-#         print(f"not synthetic: {df_price.columns}")
-#         st.session_state["df_price"] = df_price
-#         st.session_state["price_file"] = price_path
-#         st.session_state["model_dirty"] = True
-#         show_price_summary(df_price, st)
-
 
 if mode == "edit":
-    # scenario_list = ["2Drives", "drive1", "2DrivesTest"]
     # Get the current scenario base name (without .json)
     current_scenario_path = st.session_state.get(
         "scenario_json_path", get_input_path(def_scen + ".json")
@@ -306,16 +284,6 @@ if show_doc:
 
 # Use the selected price_path from the sidebar
 if mode == "price":
-    # price_options = config["price_files"]
-    # # Use the value returned by the selectbox directly
-    # price_base = st.sidebar.selectbox(
-    #     "Choose a stored price history file or tariff schedule 👇",
-    #     price_options,
-    #     index=price_options.index(
-    #         st.session_state.get("price_selectbox", price_options[0])
-    #     ),
-    #     key="price_selectbox",
-    # )
     price_base = st.session_state.get("price_selectbox", "synthetic_tariff")
     if price_base == "synthetic_tariff":
         st.markdown("### Synthetic Tariff Schedule")
@@ -846,15 +814,7 @@ elif mode == "project":
             "price_file": price_file,
             "summary_table": summary_table,
         }
-        # Save to file
-        # save_dir = "data/processed/archived_results"
-        # os.makedirs(save_dir, exist_ok=True)
         filename = f"results_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        # filepath = os.path.join(save_dir, filename)
-        # with open(filepath, "w") as f:
-        #     json.dump(output, f, indent=2)
-        # st.success(f"Results saved to {filepath}")
-
         json_str = json.dumps(output, indent=2)
         st.download_button(
             label="Download Results JSON",

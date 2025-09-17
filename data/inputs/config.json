@@ -11,6 +11,6 @@
     "Qld",
     "synthetic_tariff"
   ],
-  "default_scenario": "BensTariff",
+  "default_scenario": "Bens",
   "default_price": "Vic"
 }

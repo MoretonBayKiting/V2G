@@ -2,13 +2,15 @@
   "scenarios": [
     "WorkFromHome",
     "Commuter",
-    "2DrivesTest"
+    "Bens",
+    "2DrivesTest",
+    "BensTariff"
   ],
   "price_files": [
     "Vic",
     "Qld",
     "synthetic_tariff"
   ],
-  "default_scenario": "WorkFromHome",
+  "default_scenario": "BensTariff",
   "default_price": "Vic"
 }

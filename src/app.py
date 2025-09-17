@@ -765,7 +765,7 @@ elif mode == "project":
         else:
             selected_date = None
     inc = 1
-    # ...existing code...
+
     with col4:
         if chart_type in ["single day", "weekly"]:
             if chart_type == "weekly":

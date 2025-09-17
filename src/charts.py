@@ -515,3 +515,105 @@ def import_export_price_hist(df, st=None, bins=30):
     if st is not None:
         st.pyplot(fig)
     return fig
+
+
+def plot_v2g_v2h_value_duration_curve(df, st=None, n_bins=50, threshold=0.1):
+    """
+    Plots a stacked value duration curve for V2G/V2H, binned for clarity.
+    - df: DataFrame with model results (must include veh_batt_charge, veh_batt_discharge, grid_import, effective_import_price, veh_earnings)
+    - st: Optional Streamlit object for Streamlit plotting
+    - n_bins: Number of bins/groups for the duration curve
+    - threshold: Minimum value to include a period in the plot
+    """
+    # Select relevant fields
+    keep_fields = [
+        "veh_batt_charge",
+        "veh_batt_discharge",
+        "grid_import",
+        "effective_import_price",
+        "veh_earnings",
+    ]
+    test = df[keep_fields].copy()
+    # Calculate value components
+    test["veh_import"] = test["veh_batt_charge"] - np.maximum(
+        0, (test["veh_batt_charge"] - test["grid_import"])
+    )
+    test["veh_import_cost"] = -test["veh_import"] * test["effective_import_price"]
+    test["displaced_import_value"] = (
+        test["effective_import_price"] * test["veh_batt_discharge"]
+    )
+    test["veh_export_value"] = test["veh_earnings"]
+    test = test.fillna(0)
+    # Filter periods with significant value
+    test = test[
+        (test["displaced_import_value"] > threshold)
+        | (test["veh_export_value"] > threshold)
+        | (test["veh_import_cost"] < -threshold)
+    ]
+    # Net value per period
+    test["net_v2g_v2h_value"] = (
+        test["displaced_import_value"]
+        + test["veh_export_value"]
+        + test["veh_import_cost"]
+    )
+    # Sort by net value
+    test_sorted = test.sort_values("net_v2g_v2h_value", ascending=False).reset_index(
+        drop=True
+    )
+    # Bin periods
+    test_sorted["bin"] = pd.qcut(test_sorted.index, n_bins, labels=False)
+    binned = (
+        test_sorted.groupby("bin")
+        .agg(
+            {
+                "displaced_import_value": "sum",
+                "veh_export_value": "sum",
+                "veh_import_cost": "sum",
+            }
+        )
+        .reset_index()
+    )
+    periods_per_bin = test_sorted.groupby("bin").size()
+    median_periods = int(periods_per_bin.median())
+
+    plt.figure(figsize=(12, 6))
+    plt.bar(
+        binned["bin"],
+        binned["displaced_import_value"],
+        label="Displaced Import",
+        color="tab:blue",
+    )
+    plt.bar(
+        binned["bin"],
+        binned["veh_export_value"],
+        bottom=binned["displaced_import_value"],
+        label="Vehicle Export",
+        color="tab:green",
+    )
+    plt.bar(
+        binned["bin"],
+        binned["veh_import_cost"],
+        bottom=binned["displaced_import_value"] + binned["veh_export_value"],
+        label="Grid Import for Charging (Negative)",
+        color="tab:red",
+    )
+    plt.xlabel("Period Bin (sorted by net value)")
+    plt.ylabel("Total Value ($) per bin")
+    plt.title("Stacked Value Duration Curve for V2G/V2H (Binned periods)")
+    plt.legend()
+    plt.tight_layout()
+    plt.gca().text(
+        0.2,
+        0.9,
+        f"Each bar shows the total financial flow for about {median_periods} periods.\n"
+        f"About {median_periods * n_bins:,.0f} periods are represented.\n"
+        f"Periods where the financial flow was less than a threshold of {threshold*100}c are not included.",
+        transform=plt.gca().transAxes,
+        fontsize=11,
+        verticalalignment="top",
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7),
+    )
+    if st is not None:
+        st.pyplot(plt)
+    else:
+        plt.show()

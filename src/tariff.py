@@ -9,6 +9,129 @@ def tariff_ui(tariff_periods):
     st.markdown(
         """
         **Tariff Periods:**  
+        - Each entry has {start_hour, rate}. Start at 0 and don't go past 23.
+        - Periods are assumed ordered by start_hour; the start_hour of one is the end_hour of the previous.
+        - Export price is set by system_params.grid.fit.
+        """
+    )
+    # Use a working copy in session_state
+    if (
+        "tariff_periods_working" not in st.session_state
+        or st.session_state["tariff_periods_working"] is None
+    ):
+        st.session_state["tariff_periods_working"] = (
+            list(tariff_periods) if tariff_periods else []
+        )
+
+    periods = st.session_state["tariff_periods_working"]
+
+    st.subheader("Edit Tariff Periods")
+    edited_periods = []
+    for i, period in enumerate(periods):
+        cols = st.columns([1, 2, 2, 1])
+        with cols[0]:
+            st.write(f"Period {i}")
+        with cols[1]:
+            start_hour = st.number_input(
+                f"Start Hour {i}",
+                min_value=0,
+                max_value=23,
+                value=int(period.get("start_hour", 0)),
+                key=f"start_hour_{i}",
+            )
+        with cols[2]:
+            rate = st.number_input(
+                f"Rate (c/kWh) {i}",
+                min_value=0.0,
+                value=float(period.get("rate", 0.0)),
+                key=f"rate_{i}",
+            )
+        with cols[3]:
+            if st.button(f"Delete", key=f"delete_{i}"):
+                periods.pop(i)
+                st.session_state["tariff_periods_working"] = periods
+                st.rerun()
+        edited_periods.append({"start_hour": start_hour, "rate": rate})
+
+    # Add new period
+    st.markdown("---")
+    cols = st.columns([2, 2, 1])
+    with cols[0]:
+        new_start_hour = st.number_input(
+            "New Start Hour", min_value=0, max_value=23, value=0, key="new_start_hour"
+        )
+    with cols[1]:
+        new_rate = st.number_input(
+            "New Rate (c/kWh)", min_value=0.0, value=0.0, key="new_rate"
+        )
+    with cols[2]:
+        if st.button("Add New Tariff Period", key="add_new_period"):
+            periods.append({"start_hour": new_start_hour, "rate": new_rate})
+            st.session_state["tariff_periods_working"] = periods
+            st.rerun()
+
+    # Save all changes
+    if st.button("Save Tariff Changes", key="save_tariff_changes"):
+        st.session_state["scenario"]["synthetic_data_params"]["tariff"] = (
+            edited_periods if edited_periods else periods
+        )
+        st.session_state["tariff_periods_working"] = (
+            edited_periods if edited_periods else periods
+        )
+        st.success("Tariff periods updated.")
+        st.write(st.session_state["scenario"]["synthetic_data_params"]["tariff"])
+        # Optionally regenerate price series
+        start_date = st.session_state.get("start_date", "2024-07-01")
+        n_days = st.session_state["scenario"]["synthetic_data_params"].get(
+            "n_days", 365
+        )
+        df_price = generate_synthetic_tariff_price_df(
+            st.session_state["scenario"]["synthetic_data_params"]["tariff"],
+            start_date=start_date,
+            n_days=n_days,
+        )
+        st.session_state["df_price"] = df_price
+        export_df(st.session_state["export_df_flag"], df_price, "df_price.csv")
+
+    # Show current periods and chart
+    if periods:
+        hourly_price = np.zeros(24)
+        if edited_periods:
+            periods = edited_periods
+        sorted_periods = sorted(periods, key=lambda p: p["start_hour"])
+        for i, period in enumerate(sorted_periods):
+            start = period["start_hour"]
+            end = (
+                sorted_periods[i + 1]["start_hour"]
+                if i + 1 < len(sorted_periods)
+                else 24
+            )
+            hourly_price[start:end] = period["rate"]
+
+        fig, ax = plt.subplots(figsize=(7, 2.5))
+        ax.step(
+            range(25),
+            np.append(hourly_price, hourly_price[-1]),
+            where="post",
+            label="Tariff Rate",
+        )
+        ax.set_xticks(range(0, 25, 2))
+        ax.set_xlabel("Hour of Day")
+        ax.set_ylabel("Rate (c/kWh)")
+        ax.set_title("Tariff Profile (24h)")
+        ax.grid(True, axis="x", linestyle="--", alpha=0.5)
+        st.pyplot(fig)
+        st.write("Current Tariff Periods:", sorted_periods)
+    else:
+        st.info("No tariff periods defined. Add one above.")
+
+    return periods
+
+
+def tariff_ui_old(tariff_periods):
+    st.markdown(
+        """
+        **Tariff Periods:**  
         - For most use of this model, a price file, with wholesale NEM/SWIS prices, will be used.  But at least for comparison it will be useful
           to consider conventional, including ToU, tariffs.  Use this section to setup a tariff schedule.  Each entry has {start_hour, rate}. 
           The start_hour of one pair is the end_hour of the previous.  There's limited validation of hours.  Start at 0 and don't go past 23. 

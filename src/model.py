@@ -9,6 +9,7 @@ from charts import (
     import_export_price_hist,
     plot_cumulative_earnings_costs,
     plot_flow_stacked_by_price,
+    plot_v2g_v2h_value_duration_curve,
 )
 
 
@@ -773,6 +774,8 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
                 "pv_export": ("kWh", 0),
                 "home_batt_loss": ("kWh", 0),
                 "veh_batt_loss": ("kWh", 0),
+                "veh_batt_charge": ("kWh", 0),
+                "veh_batt_discharge": ("kWh", 0),
                 # $ metrics
                 "home_earnings": ("$", 1),
                 "veh_earnings": ("$", 1),
@@ -873,7 +876,8 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
             sankey_fig, total_flow, double_counted_sum, net_flow = plot_energy_sankey(
                 totals["Total"]
             )
-
+            if sankey_fig is not None:
+                st.plotly_chart(sankey_fig)
             if st.session_state.get("results_df") is not None:
                 df = st.session_state["results_df"]
                 st.markdown(
@@ -894,8 +898,13 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
                     """,
                     unsafe_allow_html=True,
                 )
+                stack_split_price = 100
                 fig, stacked_df = plot_flow_stacked_by_price(
-                    df, price_col="price_kwh", st=st, price_max=100, above=False
+                    df,
+                    price_col="price_kwh",
+                    st=st,
+                    price_max=stack_split_price,
+                    above=False,
                 )
                 # if fig is not None:
                 #     st.pyplot(fig)
@@ -906,11 +915,14 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
                         "stacked_df_low.csv",
                     )
                 # For prices ≥ 100c/kWh
-                fig, stacked_df = plot_flow_stacked_by_price(
-                    df, price_col="price_kwh", st=st, price_max=100, above=True
-                )
-                # if fig is not None:
-                #     st.pyplot(fig)
+                if (df["price_kwh"] > stack_split_price / 100).any():
+                    fig, stacked_df = plot_flow_stacked_by_price(
+                        df,
+                        price_col="price_kwh",
+                        st=st,
+                        price_max=stack_split_price,
+                        above=True,
+                    )
                 if stacked_df is not None:
                     export_df(
                         st.session_state["export_df_flag"],
@@ -919,6 +931,7 @@ def plot_res(st, df, chart_type, period="mthly", selected_date="2025-01-01"):
                     )
                 plot_cumulative_earnings_costs(df, st=st)
                 import_export_price_hist(df, st, bins=30)
+                plot_v2g_v2h_value_duration_curve(df, st, n_bins=50, threshold=0.1)
 
         else:
             default_names = [

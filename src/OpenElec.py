@@ -5,7 +5,7 @@ import asyncio
 
 # export OPENELECTRICITY_API_KEY=your-api-key
 os.environ["OPENELECTRICITY_API_KEY"] = (
-    "oe_3ZMnmVc4Dk7inpUS7jWA9Mpb"  # "your-api-key"  Valid for 30 days from 20250520
+    "your_api_key"  # "your-api-key"  Valid for 30 days from 20250520
 )
 # Optional: Override API server (defaults to production)
 # export OPENELECTRICITY_API_URL=http://localhost:8000/v4
